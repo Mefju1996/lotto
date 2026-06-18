@@ -34,6 +34,15 @@ wszystkie_liczby = df[liczby_cols].values.flatten()
 df_recent = df.head(50).copy()
 wszystkie_liczby_recent = df_recent[liczby_cols].values.flatten()
 
+# Oblicz statystyki dla ostatnich 50 losowań
+df_recent['Suma'] = df_recent[liczby_cols].sum(axis=1)
+df_recent['spread'] = df_recent[liczby_cols].max(axis=1) - df_recent[liczby_cols].min(axis=1)
+df_recent['suma_roznic'] = df_recent[liczby_cols].apply(lambda row: sum(abs(row[i] - row[i-1]) for i in range(1, len(row))), axis=1)
+df_recent['parzyste'] = df_recent[liczby_cols].apply(lambda row: sum(1 for x in row if x % 2 == 0), axis=1)
+df_recent['nieparzyste'] = 6 - df_recent['parzyste']
+df_recent['niskie'] = df_recent[liczby_cols].apply(lambda row: sum(1 for x in row if x <= 24), axis=1)
+df_recent['wysokie'] = 6 - df_recent['niskie']
+
 print(f"   ✓ Najnowsze losowanie: {df.iloc[0][liczby_cols].tolist()}")
 print(f"   ✓ Najstarsze losowanie w bazie: {df.iloc[-1][liczby_cols].tolist()}")
 

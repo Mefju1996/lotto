@@ -6,6 +6,9 @@ from pathlib import Path
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
+import subprocess
+import threading
+import time
 
 APP_TITLE = "Generator Lotto - Tkinter"
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -242,6 +245,8 @@ class LottoApp:
                bg="#7c3aed", fg="white", font=("Arial", 10), width=20).pack(side=LEFT, padx=5)
         Button(btn_frame, text="Plik historii", command=self._pick_history, 
                bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="Historia", command=self._show_history, 
+               bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
         
         # Status labels
         self.lbl_stats = Label(self.root, text="Statystyki: brak", 
@@ -329,12 +334,53 @@ class LottoApp:
         hp = str(self.history_path) if self.history_path else "brak"
         self.lbl_history.config(text=f"Historia: {hp}  |  Arkusz: {self.history_sheet}")
     
+    def _generate_stats_in_background(self):
+        """Generuj statystyki w osobnym wątku"""
+        def run():
+            try:
+                self.lbl_stats.config(text="Statystyki: generowanie...", fg="#fbbf24")
+                self.root.update()
+                
+                # Uruchom skrypt generowania statystyk
+                script_path = ROOT_DIR / "scripts" / "generate_lotto_stats.py"
+                result = subprocess.run(
+                    [sys.executable, str(script_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                if result.returncode == 0:
+                    print("✓ Statystyki wygenerowane pomyślnie")
+                    # Załaduj statystyki
+                    if DEFAULT_STATS.exists():
+                        self.root.after(100, lambda: self._load_stats(DEFAULT_STATS))
+                else:
+                    print(f"✗ Błąd generowania: {result.stderr}")
+                    self.lbl_stats.config(text="Statystyki: błąd generowania", fg="#ef4444")
+            except subprocess.TimeoutExpired:
+                print("✗ Timeout przy generowaniu statystyk")
+                self.lbl_stats.config(text="Statystyki: timeout", fg="#ef4444")
+            except Exception as e:
+                print(f"✗ Błąd: {e}")
+                self.lbl_stats.config(text=f"Statystyki: {str(e)}", fg="#ef4444")
+        
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+    
     def _auto_load(self):
-        if DEFAULT_STATS.exists():
-            self._load_stats(DEFAULT_STATS)
+        # Załaduj historię jeśli istnieje
         if DEFAULT_HISTORY_DB.exists():
             self.history_path = DEFAULT_HISTORY_DB
             self._load_history()
+        
+        # Załaduj statystyki jeśli istnieją, inaczej generuj je
+        if DEFAULT_STATS.exists():
+            self._load_stats(DEFAULT_STATS)
+        else:
+            print("Statystyki nie znalezione, generuję...")
+            self._generate_stats_in_background()
+        
         self._update_labels()
         self._draw()
     
@@ -360,7 +406,13 @@ class LottoApp:
             return
         try:
             self.history_db = sqlite3.connect(str(self.history_path))
-        except Exception:
+            # Test connection
+            cursor = self.history_db.cursor()
+            cursor.execute("SELECT COUNT(*) FROM draws")
+            count = cursor.fetchone()[0]
+            print(f"Historia: {count} wylosowań w bazie")
+        except Exception as e:
+            print(f"Błąd bazy: {e}")
             self.history_db = None
     
     def _pick_stats(self):
@@ -445,6 +497,70 @@ class LottoApp:
     def _on_ball_clicked(self, idx):
         if idx < len(self.current_numbers):
             self._show_number(self.current_numbers[idx])
+    
+    def _get_history_draws(self, limit=20):
+        """Pobierz ostatnie wylosowania z bazy (najstarsze na górze)"""
+        if not self.history_db:
+            return []
+        try:
+            cursor = self.history_db.cursor()
+            cursor.execute(
+                "SELECT draw_date, numbers FROM draws ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            draws = []
+            for row in cursor.fetchall():
+                date, numbers_json = row
+                try:
+                    numbers = json.loads(numbers_json)
+                    draws.append((date, numbers))
+                except:
+                    pass
+            draws.reverse()  # Odwróć aby najstarsze były na górze
+            return draws
+        except Exception as e:
+            print(f"Błąd pobierania historii: {e}")
+            return []
+    
+    def _show_history(self):
+        """Wyświetl okno z historią wylosowań"""
+        draws = self._get_history_draws(50)
+        
+        if not draws:
+            messagebox.showinfo("Historia", "Brak danych historycznych w bazie")
+            return
+        
+        # Utwórz nowe okno
+        hist_win = Toplevel(self.root)
+        hist_win.title("Historia wylosowań")
+        hist_win.geometry("600x500")
+        hist_win.configure(bg="#0b1220")
+        
+        Label(hist_win, text="Ostatnie wylosowania", 
+             font=("Arial", 12, "bold"), bg="#0b1220", fg="white").pack(pady=5)
+        
+        # Text widget z historią
+        text = Text(hist_win, bg="#0b1220", fg="#e5e7eb", font=("Courier", 10), 
+                   relief=FLAT, wrap=WORD)
+        text.pack(fill=BOTH, expand=True, padx=10, pady=5)
+        
+        scrollbar = ttk.Scrollbar(text)
+        text.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=text.yview)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        
+        # Dodaj dane
+        content = "Data                | Liczby\n"
+        content += "-" * 50 + "\n"
+        for date, numbers in draws:
+            numbers_str = " ".join(f"{n:2d}" for n in numbers)
+            content += f"{date:20s} | {numbers_str}\n"
+        
+        text.insert(END, content)
+        text.config(state=DISABLED)
+        
+        Button(hist_win, text="Zamknij", command=hist_win.destroy,
+              bg="#334155", fg="white").pack(pady=5)
     
     def _show_number(self, n):
         self.lbl_num.config(text=str(n))
