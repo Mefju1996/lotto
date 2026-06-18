@@ -1,0 +1,33 @@
+Propozycja 1:
+  Liczby: 5, 8, 14, 24, 37, 44
+  Suma: 132
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 5 - 44
+  Premiowane liczby: 5, 37
+
+Propozycja 2:
+  Liczby: 3, 9, 20, 31, 42, 47
+  Suma: 152
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 3 - 47
+  Premiowane liczby: 9, 31, 42, 47
+
+Propozycja 3:
+  Liczby: 14, 15, 23, 39, 42, 47
+  Suma: 180
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 14 - 47
+  Premiowane liczby: 15, 39, 42, 47
+
+Propozycja 4:
+  Liczby: 4, 15, 26, 31, 36, 49
+  Suma: 161
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 49
+  Premiowane liczby: 4, 15, 26, 31, 49
+
+Propozycja 5:
+  Liczby: 8, 11, 24, 27, 32, 38
+  Suma: 140
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 8 - 38

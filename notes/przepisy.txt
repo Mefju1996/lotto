@@ -1,0 +1,74 @@
+[
+  {
+    "name": "Jajecznica po śródziemnomorsku",
+    "ingredients": [
+      {
+        "name": "Jajka",
+        "quantity": "2",
+        "unit": "sztuka"
+      },
+      {
+        "name": "Ser feta",
+        "quantity": "20",
+        "unit": "g"
+      },
+      {
+        "name": "Pomidor",
+        "quantity": "100",
+        "unit": "g"
+      },
+      {
+        "name": "Oliwki",
+        "quantity": "20",
+        "unit": "g"
+      },
+      {
+        "name": "Oliwa",
+        "quantity": "5",
+        "unit": "g"
+      },
+      {
+        "name": "Rukola",
+        "quantity": "20",
+        "unit": "g"
+      },
+      {
+        "name": "Pieprz",
+        "quantity": "",
+        "unit": ""
+      },
+      {
+        "name": "Sól",
+        "quantity": "",
+        "unit": ""
+      },
+      {
+        "name": "Chleb pełnoziarnisty",
+        "quantity": "1",
+        "unit": "kromka"
+      },
+      {
+        "name": "Jajka",
+        "quantity": "2",
+        "unit": "sztuka"
+      },
+      {
+        "name": "Ser feta",
+        "quantity": "20",
+        "unit": "g"
+      },
+      {
+        "name": "Oliwki",
+        "quantity": "20",
+        "unit": "g"
+      },
+      {
+        "name": "Chleb pełnoziarnisty",
+        "quantity": "1",
+        "unit": "kromka"
+      }
+    ],
+    "instructions": "",
+    "imagePath": null
+  }
+]

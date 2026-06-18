@@ -1,0 +1,27 @@
+# Ścieżka do pliku źródłowego
+$inputFilePath = "C:\Users\Klaudia\Desktop\lottoplus1.txt"
+
+# Ścieżka do pliku docelowego
+$outputFilePath = "C:\Users\Klaudia\Desktop\wynik_lottoplus.txt"
+
+# Wczytanie zawartości pliku
+$text = Get-Content -Path $inputFilePath -Raw
+
+# Wyodrębnienie liczb, omijając daty
+$numbers = [regex]::Matches($text, '<li class="numbers_in_list " >(\d+)') | ForEach-Object { $_.Groups[1].Value }
+
+# Konwersja do liczb całkowitych i filtracja liczb mniejszych niż 60
+$filteredNumbers = $numbers | ForEach-Object { [int]$_ } | Where-Object { $_ -lt 60 }
+
+# Przygotowanie do zapisu w formacie 6 liczb na linię
+$lines = @()
+for ($i = 0; $i -lt $filteredNumbers.Count; $i += 6) {
+    $line = $filteredNumbers[$i..([math]::Min($i + 5, $filteredNumbers.Count - 1))] -join ' '
+    $lines += $line
+}
+
+# Zapisanie wyników do pliku
+$lines | Out-File -FilePath $outputFilePath -Encoding UTF8
+
+# Informacja o zakończeniu
+Write-Host "Liczby mniejsze niż 60 zostały zapisane do pliku: $outputFilePath"

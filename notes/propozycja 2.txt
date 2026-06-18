@@ -1,0 +1,346 @@
+Propozycja 1:
+  Liczby: 5, 25, 26, 39, 42, 49
+  Suma: 186
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 5 - 49
+  Premiowane liczby: 5, 25, 26, 39, 42, 49
+
+Propozycja 2:
+  Liczby: 4, 25, 26, 31, 35, 42
+  Suma: 163
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 42
+  Premiowane liczby: 4, 25, 26, 31, 35, 42
+
+Propozycja 3:
+  Liczby: 5, 24, 25, 26, 31, 49
+  Suma: 160
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 5 - 49
+  Premiowane liczby: 5, 25, 26, 31, 49
+
+Propozycja 4:
+  Liczby: 9, 20, 22, 25, 28, 44
+  Suma: 148
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 9 - 44
+  Premiowane liczby: 9, 25
+
+Propozycja 5:
+  Liczby: 4, 13, 28, 42, 47, 48
+  Suma: 182
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 4 - 48
+  Premiowane liczby: 4, 42, 48
+
+Propozycja 1:
+  Liczby: 1, 20, 25, 30, 41, 47
+  Suma: 164
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 47
+  Premiowane liczby: 1, 25
+
+Propozycja 2:
+  Liczby: 5, 12, 16, 35, 39, 42
+  Suma: 149
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 5 - 42
+  Premiowane liczby: 5, 16, 35, 39, 42
+
+Propozycja 3:
+  Liczby: 8, 20, 25, 26, 35, 49
+  Suma: 163
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 8 - 49
+  Premiowane liczby: 25, 26, 35, 49
+
+Propozycja 4:
+  Liczby: 9, 16, 22, 27, 29, 42
+  Suma: 145
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 9 - 42
+  Premiowane liczby: 9, 16, 42
+
+Propozycja 5:
+  Liczby: 4, 5, 9, 18, 48, 49
+  Suma: 133
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 49
+  Premiowane liczby: 4, 5, 9, 48, 49
+
+Propozycja 1:
+  Liczby: 16, 25, 26, 31, 44, 48
+  Suma: 190
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 16 - 48
+  Premiowane liczby: 16, 25, 26, 31, 48
+
+Propozycja 2:
+  Liczby: 4, 33, 34, 35, 40, 42
+  Suma: 188
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 4 - 42
+  Premiowane liczby: 4, 35, 42
+
+Propozycja 3:
+  Liczby: 1, 26, 31, 33, 39, 44
+  Suma: 174
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 44
+  Premiowane liczby: 1, 26, 31, 39
+
+Propozycja 4:
+  Liczby: 5, 11, 16, 41, 48, 49
+  Suma: 170
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 5 - 49
+  Premiowane liczby: 5, 16, 48, 49
+
+Propozycja 5:
+  Liczby: 4, 13, 17, 21, 40, 45
+  Suma: 140
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 4 - 45
+  Premiowane liczby: 4
+
+Propozycja 1:
+  Liczby: 16, 25, 26, 28, 37, 42
+  Suma: 174
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 16 - 42
+  Premiowane liczby: 16, 25, 26, 42
+
+Propozycja 2:
+  Liczby: 5, 26, 29, 39, 42, 46
+  Suma: 187
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 5 - 46
+  Premiowane liczby: 5, 26, 39, 42
+
+Propozycja 3:
+  Liczby: 5, 21, 25, 26, 32, 40
+  Suma: 149
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 5 - 40
+  Premiowane liczby: 5, 25, 26
+
+Propozycja 4:
+  Liczby: 3, 18, 26, 35, 39, 49
+  Suma: 170
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 3 - 49
+  Premiowane liczby: 26, 35, 39, 49
+
+Propozycja 5:
+  Liczby: 5, 16, 22, 26, 44, 49
+  Suma: 162
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 5 - 49
+  Premiowane liczby: 5, 16, 26, 49
+
+Propozycja 1:
+  Liczby: 1, 9, 16, 25, 47, 48
+  Suma: 146
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 48
+  Premiowane liczby: 1, 9, 16, 25, 48
+
+Propozycja 2:
+  Liczby: 4, 24, 25, 26, 35, 48
+  Suma: 162
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 4 - 48
+  Premiowane liczby: 4, 25, 26, 35, 48
+
+Propozycja 3:
+  Liczby: 1, 9, 21, 27, 38, 42
+  Suma: 138
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 42
+  Premiowane liczby: 1, 9, 42
+
+Propozycja 4:
+  Liczby: 5, 9, 21, 25, 42, 48
+  Suma: 150
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 5 - 48
+  Premiowane liczby: 5, 9, 25, 42, 48
+
+Propozycja 5:
+  Liczby: 4, 25, 26, 34, 35, 49
+  Suma: 173
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 49
+  Premiowane liczby: 4, 25, 26, 35, 49
+
+Propozycja 1:
+  Liczby: 1, 25, 26, 31, 35, 42
+  Suma: 160
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 42
+  Premiowane liczby: 1, 25, 26, 31, 35, 42
+
+Propozycja 2:
+  Liczby: 9, 13, 16, 17, 35, 48
+  Suma: 138
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 9 - 48
+  Premiowane liczby: 9, 16, 35, 48
+
+Propozycja 3:
+  Liczby: 16, 17, 27, 38, 39, 40
+  Suma: 177
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 16 - 40
+  Premiowane liczby: 16, 39
+
+Propozycja 4:
+  Liczby: 2, 25, 26, 33, 39, 49
+  Suma: 174
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 2 - 49
+  Premiowane liczby: 25, 26, 39, 49
+
+Propozycja 5:
+  Liczby: 4, 9, 31, 34, 42, 49
+  Suma: 169
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 49
+  Premiowane liczby: 4, 9, 31, 42, 49
+Propozycja 1:
+  Liczby: 1, 5, 25, 26, 35, 48
+  Suma: 140
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 48
+  Premiowane liczby: 1, 5, 25, 26, 35, 48
+
+Propozycja 2:
+  Liczby: 8, 10, 11, 21, 31, 49
+  Suma: 130
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 8 - 49
+  Premiowane liczby: 31, 49
+
+Propozycja 3:
+  Liczby: 10, 16, 18, 31, 35, 42
+  Suma: 152
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 10 - 42
+  Premiowane liczby: 16, 31, 35, 42
+
+Propozycja 4:
+  Liczby: 5, 7, 20, 35, 42, 48
+  Suma: 157
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 5 - 48
+  Premiowane liczby: 5, 35, 42, 48
+
+Propozycja 5:
+  Liczby: 4, 5, 16, 39, 41, 48
+  Suma: 153
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 48
+  Premiowane liczby: 4, 5, 16, 39, 48
+Propozycja 1:
+  Liczby: 15, 26, 31, 34, 41, 42
+  Suma: 189
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 15 - 42
+  Premiowane liczby: 26, 31, 42
+
+Propozycja 2:
+  Liczby: 4, 20, 23, 24, 26, 39
+  Suma: 136
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 4 - 39
+  Premiowane liczby: 4, 26, 39
+
+Propozycja 3:
+  Liczby: 22, 25, 31, 34, 35, 39
+  Suma: 186
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 22 - 39
+  Premiowane liczby: 25, 31, 35, 39
+
+Propozycja 4:
+  Liczby: 1, 18, 31, 35, 36, 42
+  Suma: 163
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 1 - 42
+  Premiowane liczby: 1, 31, 35, 42
+
+Propozycja 5:
+  Liczby: 4, 13, 18, 43, 47, 48
+  Suma: 173
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 4 - 48
+  Premiowane liczby: 4, 48
+Propozycja 1:
+  Liczby: 5, 9, 16, 32, 35, 42
+  Suma: 139
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 5 - 42
+  Premiowane liczby: 5, 9, 16, 35, 42
+
+Propozycja 2:
+  Liczby: 1, 9, 25, 35, 42, 46
+  Suma: 158
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 46
+  Premiowane liczby: 1, 9, 25, 35, 42
+
+Propozycja 3:
+  Liczby: 5, 16, 25, 27, 37, 48
+  Suma: 158
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 5 - 48
+  Premiowane liczby: 5, 16, 25, 48
+
+Propozycja 4:
+  Liczby: 1, 4, 26, 39, 41, 49
+  Suma: 160
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 49
+  Premiowane liczby: 1, 4, 26, 39, 49
+
+Propozycja 5:
+  Liczby: 4, 9, 20, 24, 42, 45
+  Suma: 144
+  Parzyste: 4, Nieparzyste: 2
+  Zakres: 4 - 45
+  Premiowane liczby: 4, 9, 42
+
+Propozycja 1:
+  Liczby: 12, 16, 21, 25, 31, 35
+  Suma: 140
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 12 - 35
+  Premiowane liczby: 16, 25, 31, 35
+
+Propozycja 2:
+  Liczby: 1, 26, 30, 32, 33, 43
+  Suma: 165
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 1 - 43
+  Premiowane liczby: 1, 26
+
+Propozycja 3:
+  Liczby: 10, 11, 22, 31, 42, 49
+  Suma: 165
+  Parzyste: 3, Nieparzyste: 3
+  Zakres: 10 - 49
+  Premiowane liczby: 31, 42, 49
+
+Propozycja 4:
+  Liczby: 14, 17, 18, 31, 39, 49
+  Suma: 168
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 14 - 49
+  Premiowane liczby: 31, 39, 49
+
+Propozycja 5:
+  Liczby: 1, 9, 16, 35, 36, 49
+  Suma: 146
+  Parzyste: 2, Nieparzyste: 4
+  Zakres: 1 - 49
+  Premiowane liczby: 1, 9, 16, 35, 49

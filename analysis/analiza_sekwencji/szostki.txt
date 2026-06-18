@@ -1,0 +1,2 @@
+Kombinacja	Liczba wystąpień
+Brak kombinacji występujących więcej niż raz

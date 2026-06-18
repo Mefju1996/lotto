@@ -1,0 +1,21 @@
+from itertools import combinations
+
+# Zakres liczb
+numbers = range(1, 49)
+
+# Lista do przechowywania kombinacji
+valid_combinations = []
+
+# Sprawdzenie wszystkich kombinacji 6 liczb
+for combo in combinations(numbers, 6):
+    if sum(combo) == 107:
+        valid_combinations.append(combo)
+
+# Zapisanie wyników do pliku
+output_file_path = "combinations.txt"
+with open(output_file_path, 'w') as f:
+    for combo in valid_combinations:
+        f.write(' '.join(map(str, combo)) + '\n')
+
+print(f"Liczba kombinacji sześciu liczb, których suma wynosi 107: {len(valid_combinations)}")
+print(f"Wszystkie kombinacje zostały zapisane do pliku: {output_file_path}")

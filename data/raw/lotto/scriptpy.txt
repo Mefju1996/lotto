@@ -1,0 +1,26 @@
+import itertools
+import random
+def is_valid_combination(numbers):
+    differences = [b - a for a, b in zip(numbers, numbers[1:])]
+    if any(diff > 17 for diff in differences):
+        return False
+    total_difference = sum(differences)
+    if not (23 <= total_difference <= 47):
+        return False
+    return True
+def find_valid_combination():
+    all_numbers = range(1, 50)
+    valid_combinations = []   
+    for combo in itertools.combinations(all_numbers, 6):
+        if sum(combo) != 131:
+            continue
+        sorted_combo = sorted(combo)
+        if is_valid_combination(sorted_combo):
+            valid_combinations.append(sorted_combo)    
+    return valid_combinations
+valid_combinations = find_valid_combination()
+result = random.choice(valid_combinations) if valid_combinations else None
+if result:
+    print("Wylosowane liczby:", result)
+else:
+    print("Nie znaleziono pasującej kombinacji.")

@@ -1,0 +1,32 @@
+import random
+
+def is_valid(numbers):
+    # Sprawdzenie, czy suma liczb mieści się w przedziale 130-168
+    if not (130 <= sum(numbers) <= 168):
+        return False
+    
+    # Sprawdzenie różnicy pomiędzy parami
+    differences = [abs(numbers[i] - numbers[i - 1]) for i in range(1, len(numbers))]
+    if any(diff > 17 for diff in differences):
+        return False
+    
+    # Sprawdzenie sumy różnic
+    if not (27 <= sum(differences) <= 47):
+        return False
+    
+    return True
+
+def generate_numbers():
+    while True:
+        # Losowanie 6 liczb z przedziału 1-100 (możesz dostosować ten zakres)
+        numbers = sorted(random.sample(range(1, 101), 6))
+        
+        if is_valid(numbers):
+            return numbers
+
+# Generowanie liczb
+result = generate_numbers()
+print("Wylosowane liczby:", result)
+print("Suma:", sum(result))
+print("Różnice:", [abs(result[i] - result[i - 1]) for i in range(1, len(result))])
+print("Suma różnic:", sum([abs(result[i] - result[i - 1]) for i in range(1, len(result))]))
