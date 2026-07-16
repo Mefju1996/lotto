@@ -227,6 +227,26 @@ class LottoStatistics:
             "streak": streak,
         }
 
+def _clamp(v, lo=0, hi=255):
+    return max(lo, min(hi, int(v)))
+
+def _hex_to_rgb(hex_color: str):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def _rgb_to_hex(rgb):
+    r, g, b = (_clamp(x) for x in rgb)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+def _mix_colors(c1: str, c2: str, t: float):
+    t = max(0.0, min(1.0, t))
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    return _rgb_to_hex((
+        r1 + (r2 - r1) * t,
+        g1 + (g2 - g1) * t,
+        b1 + (b2 - b1) * t,
+    ))
 
 class LottoApp:
     def __init__(self, root):
@@ -253,6 +273,30 @@ class LottoApp:
     # ------------------------------------------------------------------
     # STATUS BAR
     # ------------------------------------------------------------------
+    def _number_color_from_cold_streak(self, n):
+        cold = "#ef4444"   # świeża / mocna czerwień
+        warm = "#f59e0b"   # pośredni pomarańcz
+        blue = "#2563eb"   # długi brak -> niebieski
+
+        streak = None
+        if self.stats:
+            d = self.stats.number_stats(n)
+            if d and d.get("streak"):
+                streak = d["streak"].get("losowan_temu")
+
+        if streak is None:
+            return "#475569"  # neutralny, gdy brak danych
+
+        # Skala: 0-10 losowań -> ciepłe tony, 10-40 -> przejście do blue
+        if streak <= 10:
+            t = streak / 10
+            return _mix_colors(cold, warm, t)
+        elif streak <= 40:
+            t = (streak - 10) / 30
+            return _mix_colors(warm, blue, t)
+        else:
+            return blue
+
     def set_status(self, msg: str, level: str = "info", auto_reset: bool = True) -> None:
         """
         Wyświetla komunikat w status barze.
