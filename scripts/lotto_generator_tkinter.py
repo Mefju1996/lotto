@@ -247,6 +247,10 @@ class LottoApp:
                bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
         Button(btn_frame, text="Historia", command=self._show_history, 
                bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="📊 Baza danych", command=self._show_database, 
+               bg="#6366f1", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
+        Button(btn_frame, text="⟳ Aktualizuj", command=self._update_results, 
+               bg="#059669", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
         
         # Status labels
         self.lbl_stats = Label(self.root, text="Statystyki: brak", 
@@ -367,6 +371,155 @@ class LottoApp:
         
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
+    
+    def _update_results(self):
+        """Aktualizuj wyniki lotto z megalotto.pl"""
+        def run():
+            try:
+                self.lbl_history.config(text="Historia: aktualizacja...", fg="#fbbf24")
+                self.root.update()
+                
+                # Uruchom skrypt aktualizacji
+                script_path = ROOT_DIR / "scripts" / "update_lotto_results.py"
+                result = subprocess.run(
+                    [sys.executable, str(script_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                # Załaduj historię ponownie
+                self._load_history()
+                self._update_labels()
+                
+                if result.returncode == 0:
+                    print("✓ Wyniki zaktualizowane")
+                    messagebox.showinfo("Sukces", "Wyniki lotto zostały zaktualizowane")
+                    # Regeneruj statystyki
+                    self._generate_stats_in_background()
+                else:
+                    error_msg = result.stderr[:200] if result.stderr else "Nieznany błąd"
+                    print(f"✗ Błąd aktualizacji: {error_msg}")
+                    messagebox.showerror("Błąd", f"Nie udało się zaktualizować wyników:\n{error_msg}")
+                    self._update_labels()
+            except subprocess.TimeoutExpired:
+                print("✗ Timeout")
+                messagebox.showerror("Timeout", "Aktualizacja trwała zbyt długo")
+                self._update_labels()
+            except Exception as e:
+                print(f"✗ Błąd: {e}")
+                messagebox.showerror("Błąd", f"Błąd aktualizacji: {str(e)}")
+                self._update_labels()
+        
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+    
+    def _show_database(self):
+        """Wyświetl zawartość bazy danych w tabelce"""
+        if not self.history_db:
+            messagebox.showwarning("Baza danych", "Baza danych nie jest załadowana")
+            return
+        
+        try:
+            cursor = self.history_db.cursor()
+            cursor.execute("SELECT id, draw_date, numbers FROM draws ORDER BY id DESC LIMIT 100")
+            rows = cursor.fetchall()
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Nie mogę odczytać bazy: {e}")
+            return
+        
+        # Nowe okno
+        db_win = Toplevel(self.root)
+        db_win.title("Baza danych - Wyniki Lotto")
+        db_win.geometry("900x600")
+        db_win.configure(bg="#0b1220")
+        
+        # Nagłówek
+        header_frame = Frame(db_win, bg="#0b1220")
+        header_frame.pack(pady=5)
+        
+        Label(header_frame, text=f"Wyświetlono 100 ostatnich losowań (total: {len(rows)})", 
+             font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
+        
+        # Tabela
+        tree_frame = Frame(db_win, bg="#0b1220")
+        tree_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
+        
+        # Scrollbary
+        vsb = ttk.Scrollbar(tree_frame, orient=VERTICAL)
+        hsb = ttk.Scrollbar(tree_frame, orient=HORIZONTAL)
+        
+        # Treeview
+        tree = ttk.Treeview(tree_frame, columns=("ID", "Data", "Liczby"), height=25,
+                           yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        
+        vsb.config(command=tree.yview)
+        hsb.config(command=tree.xview)
+        
+        tree.heading("#0", text="Lp.")
+        tree.heading("ID", text="ID")
+        tree.heading("Data", text="Data")
+        tree.heading("Liczby", text="Liczby")
+        
+        tree.column("#0", width=40)
+        tree.column("ID", width=60)
+        tree.column("Data", width=150)
+        tree.column("Liczby", width=600)
+        
+        # Styl
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Treeview", background="#111827", foreground="white", 
+                       fieldbackground="#1f2937", borderwidth=0)
+        style.configure("Treeview.Heading", background="#1f2937", foreground="white")
+        style.map("Treeview", background=[("selected", "#374151")])
+        
+        # Dodaj dane
+        for idx, (draw_id, date, numbers_json) in enumerate(rows, 1):
+            try:
+                numbers = json.loads(numbers_json)
+                numbers_str = " ".join(f"{n:2d}" for n in numbers)
+            except:
+                numbers_str = "ERROR"
+            
+            tree.insert("", 0, text=str(idx), values=(draw_id, date[:16], numbers_str))
+        
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+        
+        # Przycisk eksportu
+        export_frame = Frame(db_win, bg="#0b1220")
+        export_frame.pack(pady=5)
+        
+        def export_to_csv():
+            try:
+                path = filedialog.asksaveasfilename(
+                    parent=db_win, defaultextension=".csv",
+                    filetypes=[("CSV", "*.csv"), ("All", "*.*")]
+                )
+                if not path:
+                    return
+                
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write("ID,Data,Liczby\n")
+                    for draw_id, date, numbers_json in rows:
+                        try:
+                            numbers = json.loads(numbers_json)
+                            numbers_str = " ".join(str(n) for n in numbers)
+                        except:
+                            numbers_str = "ERROR"
+                        f.write(f"{draw_id},{date},{numbers_str}\n")
+                
+                messagebox.showinfo("Sukces", f"Dane wyeksportowane do:\n{path}")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie mogę eksportować: {e}")
+        
+        Button(export_frame, text="Eksportuj do CSV", command=export_to_csv,
+              bg="#334155", fg="white", font=("Arial", 10)).pack()
     
     def _auto_load(self):
         # Załaduj historię jeśli istnieje
