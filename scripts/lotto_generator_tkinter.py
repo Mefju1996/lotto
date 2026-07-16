@@ -44,6 +44,31 @@ def get_python_executable() -> str:
     return sys.executable
 
 
+def run_script(script_path, extra_args=None, timeout=300):
+    """
+    Uruchamia skrypt Pythona z wymuszonym UTF-8 (PYTHONUTF8=1 + -X utf8).
+    Zwraca CompletedProcess.
+    """
+    import os
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    cmd = [get_python_executable(), "-X", "utf8", str(script_path)]
+    if extra_args:
+        cmd += extra_args
+
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=env,
+    )
+
+
 ROOT_DIR = get_root_dir()
 DATA_DIR = ROOT_DIR / "data"
 ANALYSIS_DIR = ROOT_DIR / "analysis"
@@ -498,12 +523,7 @@ class LottoApp:
                         f"Brak skryptu statystyk: {script_path}", "error", auto_reset=False))
                     return
 
-                result = subprocess.run(
-                    [get_python_executable(), str(script_path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
+                result = run_script(script_path, timeout=300)
 
                 if result.returncode == 0:
                     latest = find_latest_stats()
@@ -515,7 +535,7 @@ class LottoApp:
                         self.root.after(0, lambda: self.set_status(
                             "Statystyki: plik nie znaleziony po generowaniu", "error", auto_reset=False))
                 else:
-                    err = result.stderr[:200] if result.stderr else "Nieznany b\u0142\u0105d"
+                    err = result.stderr[:300] if result.stderr else "Nieznany b\u0142\u0105d"
                     self.root.after(0, lambda e=err: self.set_status(
                         f"B\u0142\u0105d generowania statystyk: {e}", "error", auto_reset=False))
             except subprocess.TimeoutExpired:
@@ -542,12 +562,7 @@ class LottoApp:
                         f"Brak skryptu aktualizacji: {script_path}", "error", auto_reset=False))
                     return
 
-                result = subprocess.run(
-                    [get_python_executable(), str(script_path), "--update-xlsx"],
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
+                result = run_script(script_path, extra_args=["--update-xlsx"], timeout=120)
 
                 if result.returncode == 0:
                     self.root.after(0, self._reload_history_main_thread)
@@ -555,7 +570,7 @@ class LottoApp:
                         "Wyniki lotto zaktualizowane pomy\u015blnie", "success"))
                     self.root.after(300, self._generate_stats_in_background)
                 else:
-                    error_msg = result.stderr[:200] if result.stderr else "Nieznany b\u0142\u0105d"
+                    error_msg = result.stderr[:300] if result.stderr else "Nieznany b\u0142\u0105d"
                     self.root.after(0, self._update_labels)
                     self.root.after(0, lambda e=error_msg: self.set_status(
                         f"B\u0142\u0105d aktualizacji: {e}", "error", auto_reset=False))
