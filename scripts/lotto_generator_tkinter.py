@@ -244,7 +244,7 @@ class LottoApp:
         self.history_path = None
         self.history_sheet = DEFAULT_HISTORY_SHEET
         self.current_numbers = []
-        self._status_reset_id = None  # id after() do auto-resetu statusu
+        self._status_reset_id = None
 
         # Build UI
         self._build_ui()
@@ -257,12 +257,11 @@ class LottoApp:
         """
         Wyświetla komunikat w status barze.
         level: 'info' | 'success' | 'warning' | 'error'
-        auto_reset: po 5s wraca do 'Gotowy' (tylko dla info/success).
+        auto_reset: po 5s wraca do 'Gotowy' (tylko info/success).
         """
         color = _STATUS_COLORS.get(level, _STATUS_COLORS["info"])
         self.status_bar.config(text=f"  {msg}", foreground=color)
 
-        # Anuluj poprzedni timer resetowania
         if self._status_reset_id is not None:
             self.root.after_cancel(self._status_reset_id)
             self._status_reset_id = None
@@ -274,35 +273,52 @@ class LottoApp:
 
     def _build_ui(self):
         # Title
-        title = Label(self.root, text="Generator Lotto - Tkinter",
-                     font=("Arial", 20, "bold"), bg="#0b1220", fg="white")
-        title.pack(pady=10)
+        Label(self.root, text="Generator Lotto - Tkinter",
+              font=("Arial", 20, "bold"), bg="#0b1220", fg="white").pack(pady=10)
 
-        # Control buttons
+        # ── PASEK NARZĘDZI (uproszczony) ──────────────────────────────
         btn_frame = Frame(self.root, bg="#0b1220")
         btn_frame.pack(pady=5, fill=X, padx=10)
 
-        Button(btn_frame, text="Losuj", command=self._draw,
-               bg="#0ea5e9", fg="white", font=("Arial", 10, "bold"), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="Wczytaj statystyki", command=self._pick_stats,
-               bg="#7c3aed", fg="white", font=("Arial", 10), width=20).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="Plik historii", command=self._pick_history,
-               bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="Historia", command=self._show_history,
-               bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="\U0001f4ca Baza danych", command=self._show_database,
-               bg="#6366f1", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="\u27f3 Aktualizuj", command=self._update_results,
-               bg="#059669", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
+        # 1. Losuj — najważniejszy, wyeksponowany
+        Button(btn_frame, text="\U0001f3b1  Losuj", command=self._draw,
+               bg="#0ea5e9", fg="white", font=("Arial", 10, "bold"), width=14,
+               relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
-        # Status labels (zachowane dla kompatybilności)
-        self.lbl_stats = Label(self.root, text="Statystyki: brak",
-                              bg="#0b1220", fg="#a78bfa", font=("Arial", 9))
-        self.lbl_stats.pack(pady=2)
+        # 2. Aktualizuj — często używany, wyeksponowany
+        Button(btn_frame, text="\u27f3  Aktualizuj", command=self._update_results,
+               bg="#059669", fg="white", font=("Arial", 10, "bold"), width=14,
+               relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
-        self.lbl_history = Label(self.root, text="Historia: brak",
-                                bg="#0b1220", fg="#fbbf24", font=("Arial", 9))
-        self.lbl_history.pack(pady=2)
+        # Separator wizualny
+        ttk.Separator(btn_frame, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=8, pady=4)
+
+        # 3. Menu rozwijane "▾ Dane" — rzadziej używane opcje
+        self._data_menu = Menu(self.root, tearoff=0, bg="#1f2937", fg="white",
+                               activebackground="#374151", activeforeground="white",
+                               relief=FLAT, bd=0)
+        self._data_menu.add_command(label="\U0001f4ca  Wczytaj statystyki",
+                                    command=self._pick_stats)
+        self._data_menu.add_command(label="\U0001f4c2  Plik historii — zmień",
+                                    command=self._pick_history)
+        self._data_menu.add_command(label="\U0001f4dc  Historia losowań",
+                                    command=self._show_history)
+        self._data_menu.add_separator()
+        self._data_menu.add_command(label="\U0001f5c4  Baza danych",
+                                    command=self._show_database)
+
+        def _open_data_menu():
+            btn = self._btn_data
+            x = btn.winfo_rootx()
+            y = btn.winfo_rooty() + btn.winfo_height()
+            self._data_menu.tk_popup(x, y)
+
+        self._btn_data = Button(
+            btn_frame, text="\u25be  Dane", command=_open_data_menu,
+            bg="#334155", fg="white", font=("Arial", 10), width=12,
+            relief=RAISED, bd=1
+        )
+        self._btn_data.pack(side=LEFT, padx=5)
 
         # Main content
         content_frame = Frame(self.root, bg="#0b1220")
@@ -312,7 +328,7 @@ class LottoApp:
         left_frame = Frame(content_frame, bg="#0b1220")
         left_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
 
-        # Balls (numbers display)
+        # Balls
         balls_frame = Frame(left_frame, bg="#0b1220")
         balls_frame.pack(pady=10)
 
@@ -358,7 +374,7 @@ class LottoApp:
         self.diff_text.pack(fill=BOTH, expand=True, padx=5, pady=5)
         self.diff_text.config(state=DISABLED)
 
-        # Right panel - details
+        # Right panel
         right_frame = Frame(content_frame, bg="#111827", relief=RIDGE, bd=1)
         right_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
 
@@ -374,10 +390,8 @@ class LottoApp:
         self.details_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.details_text.config(state=DISABLED)
 
-        # ── STATUS BAR (na dole okna, po wszystkich innych widgetach) ──
-        separator = ttk.Separator(self.root, orient=HORIZONTAL)
-        separator.pack(fill=X, side=BOTTOM)
-
+        # ── STATUS BAR ─────────────────────────────────────────────────
+        ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, side=BOTTOM)
         self.status_bar = ttk.Label(
             self.root,
             text="  Gotowy",
@@ -391,28 +405,27 @@ class LottoApp:
         self.status_bar.pack(side=BOTTOM, fill=X)
 
     def _update_labels(self):
-        sp = str(self.stats_path) if self.stats_path else "brak"
-        ok = "OK" if self.stats else "brak danych"
-        self.lbl_stats.config(text=f"Statystyki: {sp}  |  {ok}")
-        hp = str(self.history_path) if self.history_path else "brak"
-        self.lbl_history.config(text=f"Historia: {hp}  |  Arkusz: {self.history_sheet}")
-
-        # Aktualizuj też status bar skróconą informacją
+        """Aktualizuje status bar skróconą informacją o stanie danych."""
         if self.stats and self.history_db:
-            self.set_status(f"Statystyki: {self.stats_path.name}  |  Historia: {self.history_path.name}",
-                            "info", auto_reset=False)
+            self.set_status(
+                f"Statystyki: {self.stats_path.name}  |  Historia: {self.history_path.name}",
+                "info", auto_reset=False
+            )
         elif self.stats:
-            self.set_status(f"Statystyki: {self.stats_path.name}  |  Historia: brak", "warning", auto_reset=False)
+            self.set_status(
+                f"Statystyki: {self.stats_path.name}  |  Historia: brak",
+                "warning", auto_reset=False
+            )
         else:
-            self.set_status("Brak statystyk — użyj 'Wczytaj statystyki'", "warning", auto_reset=False)
+            self.set_status("Brak statystyk — użyj menu 'Dane' → Wczytaj statystyki",
+                            "warning", auto_reset=False)
 
     def _generate_stats_in_background(self):
         """Generuj statystyki w osobnym wątku."""
         def run():
             try:
-                self.root.after(0, lambda: self.set_status("Generowanie statystyk...", "warning", auto_reset=False))
-                self.root.after(0, lambda: self.lbl_stats.config(
-                    text="Statystyki: generowanie...", fg="#fbbf24"))
+                self.root.after(0, lambda: self.set_status(
+                    "Generowanie statystyk...", "warning", auto_reset=False))
 
                 script_path = ROOT_DIR / "scripts" / "generate_lotto_stats_final.py"
                 if not script_path.exists():
@@ -434,35 +447,25 @@ class LottoApp:
                     else:
                         self.root.after(0, lambda: self.set_status(
                             "Statystyki: plik nie znaleziony po generowaniu", "error", auto_reset=False))
-                        self.root.after(0, lambda: self.lbl_stats.config(
-                            text="Statystyki: plik nie znaleziony po generowaniu", fg="#ef4444"))
                 else:
                     err = result.stderr[:200] if result.stderr else "Nieznany błąd"
                     self.root.after(0, lambda e=err: self.set_status(
                         f"Błąd generowania statystyk: {e}", "error", auto_reset=False))
-                    self.root.after(0, lambda: self.lbl_stats.config(
-                        text="Statystyki: błąd generowania", fg="#ef4444"))
             except subprocess.TimeoutExpired:
                 self.root.after(0, lambda: self.set_status(
                     "Timeout przy generowaniu statystyk", "error", auto_reset=False))
-                self.root.after(0, lambda: self.lbl_stats.config(
-                    text="Statystyki: timeout", fg="#ef4444"))
             except Exception as e:
                 self.root.after(0, lambda ex=e: self.set_status(
                     f"Błąd statystyk: {ex}", "error", auto_reset=False))
-                self.root.after(0, lambda ex=e: self.lbl_stats.config(
-                    text=f"Statystyki: {ex}", fg="#ef4444"))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _update_results(self):
-        """Aktualizuj wyniki lotto z megalotto.pl."""
+        """Aktualizuj wyniki lotto z megalotto.pl (fallback: lotto.pl)."""
         def run():
             try:
                 self.root.after(0, lambda: self.set_status(
                     "Aktualizacja wyników lotto...", "warning", auto_reset=False))
-                self.root.after(0, lambda: self.lbl_history.config(
-                    text="Historia: aktualizacja...", fg="#fbbf24"))
 
                 script_path = ROOT_DIR / "scripts" / "scraper_megalotto.py"
                 if not script_path.exists():
@@ -530,11 +533,9 @@ class LottoApp:
         db_win.geometry("900x600")
         db_win.configure(bg="#0b1220")
 
-        header_frame = Frame(db_win, bg="#0b1220")
-        header_frame.pack(pady=5)
-
-        Label(header_frame, text=f"Wyświetlono 100 ostatnich losowań (total: {len(rows)})",
-             font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
+        Label(Frame(db_win, bg="#0b1220").pack(pady=5) or db_win,
+              text=f"Wyświetlono 100 ostatnich losowań (total: {len(rows)})",
+              font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
 
         tree_frame = Frame(db_win, bg="#0b1220")
         tree_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
@@ -544,7 +545,6 @@ class LottoApp:
 
         tree = ttk.Treeview(tree_frame, columns=("ID", "Data", "Liczby"), height=25,
                            yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
         vsb.config(command=tree.yview)
         hsb.config(command=tree.xview)
 
@@ -552,14 +552,13 @@ class LottoApp:
         tree.heading("ID", text="ID")
         tree.heading("Data", text="Data")
         tree.heading("Liczby", text="Liczby")
-
         tree.column("#0", width=40)
         tree.column("ID", width=60)
         tree.column("Data", width=150)
         tree.column("Liczby", width=600)
 
         style = ttk.Style()
-        style.theme_use('clam')
+        style.theme_use("clam")
         style.configure("Treeview", background="#111827", foreground="white",
                        fieldbackground="#1f2937", borderwidth=0)
         style.configure("Treeview.Heading", background="#1f2937", foreground="white")
@@ -567,50 +566,40 @@ class LottoApp:
 
         for idx, (draw_id, date, numbers_json) in enumerate(rows, 1):
             try:
-                numbers = json.loads(numbers_json)
-                numbers_str = " ".join(f"{n:2d}" for n in numbers)
+                numbers_str = " ".join(f"{n:2d}" for n in json.loads(numbers_json))
             except Exception:
                 numbers_str = "ERROR"
-
             tree.insert("", 0, text=str(idx), values=(draw_id, date[:16], numbers_str))
 
         tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
-
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
-
-        export_frame = Frame(db_win, bg="#0b1220")
-        export_frame.pack(pady=5)
 
         def export_to_csv():
             try:
                 path = filedialog.asksaveasfilename(
                     parent=db_win, defaultextension=".csv",
-                    filetypes=[("CSV", "*.csv"), ("All", "*.*")]
-                )
+                    filetypes=[("CSV", "*.csv"), ("All", "*.*")])
                 if not path:
                     return
-
-                with open(path, 'w', encoding='utf-8') as f:
+                with open(path, "w", encoding="utf-8") as f:
                     f.write("ID,Data,Liczby\n")
                     for draw_id, date, numbers_json in rows:
                         try:
-                            numbers = json.loads(numbers_json)
-                            numbers_str = " ".join(str(n) for n in numbers)
+                            nums = " ".join(str(n) for n in json.loads(numbers_json))
                         except Exception:
-                            numbers_str = "ERROR"
-                        f.write(f"{draw_id},{date},{numbers_str}\n")
-
+                            nums = "ERROR"
+                        f.write(f"{draw_id},{date},{nums}\n")
                 self.set_status(f"Dane wyeksportowane: {path}", "success")
                 messagebox.showinfo("Sukces", f"Dane wyeksportowane do:\n{path}")
             except Exception as e:
                 self.set_status(f"Błąd eksportu: {e}", "error")
                 messagebox.showerror("Błąd", f"Nie mogę eksportować: {e}")
 
-        Button(export_frame, text="Eksportuj do CSV", command=export_to_csv,
-              bg="#334155", fg="white", font=("Arial", 10)).pack()
+        Button(db_win, text="Eksportuj do CSV", command=export_to_csv,
+               bg="#334155", fg="white", font=("Arial", 10)).pack(pady=5)
 
     def _auto_load(self):
         if DEFAULT_HISTORY_DB.exists():
@@ -655,11 +644,9 @@ class LottoApp:
             return
         try:
             self.history_db = sqlite3.connect(
-                str(self.history_path), check_same_thread=False
-            )
-            cursor = self.history_db.cursor()
-            cursor.execute("SELECT COUNT(*) FROM draws")
-            count = cursor.fetchone()[0]
+                str(self.history_path), check_same_thread=False)
+            count = self.history_db.execute(
+                "SELECT COUNT(*) FROM draws").fetchone()[0]
             self.set_status(f"Historia załadowana: {count} losowań", "success")
         except Exception as e:
             self.history_db = None
@@ -683,7 +670,8 @@ class LottoApp:
         start = str(self.history_path.parent if self.history_path else ROOT_DIR)
         path = filedialog.askopenfilename(
             parent=self.root, title="Wybierz plik historii",
-            initialdir=start, filetypes=[("All", "*.*"), ("Excel", "*.xlsx *.xls"), ("SQLite", "*.db")])
+            initialdir=start,
+            filetypes=[("All", "*.*"), ("Excel", "*.xlsx *.xls"), ("SQLite", "*.db")])
         if path:
             self.history_path = Path(path)
             self._load_history()
@@ -694,11 +682,9 @@ class LottoApp:
             return False
         try:
             numbers_json = json.dumps(sorted(numbers))
-            cursor = self.history_db.execute(
+            return self.history_db.execute(
                 "SELECT COUNT(*) FROM draws WHERE numbers = ?",
-                (numbers_json,)
-            )
-            return cursor.fetchone()[0] > 0
+                (numbers_json,)).fetchone()[0] > 0
         except Exception:
             return False
 
@@ -710,12 +696,7 @@ class LottoApp:
         cold = self.stats.cold_rank if self.stats else {}
 
         for btn, n in zip(self.ball_labels, numbers):
-            if n in hot:
-                color = "#ef4444"
-            elif n in cold:
-                color = "#475569"
-            else:
-                color = "#2563eb"
+            color = "#ef4444" if n in hot else ("#475569" if n in cold else "#2563eb")
             btn.config(text=str(n), bg=color)
 
         self.stat_cards["Suma"].config(text=str(s["suma"]))
@@ -723,13 +704,8 @@ class LottoApp:
         self.stat_cards["Suma roznic"].config(text=str(s["suma_roznic"]))
         self.stat_cards["P/N"].config(text=f"{s['parzyste']}P-{s['nieparzyste']}N")
         self.stat_cards["L/H"].config(text=f"{s['niskie']}L-{s['wysokie']}H")
-        self.stat_cards["Historia"].config(text="BY\u0141A" if self._combination_exists(numbers) else "NOWA")
-
-        for card_key in ["Suma", "Spread"]:
-            if card_key == "Suma":
-                self.stat_cards["Suma_label"] = s["suma"]
-            else:
-                self.stat_cards["Spread_label"] = s["spread"]
+        self.stat_cards["Historia"].config(
+            text="BY\u0141A" if self._combination_exists(numbers) else "NOWA")
 
         self.diff_text.config(state=NORMAL)
         self.diff_text.delete("1.0", END)
@@ -743,21 +719,16 @@ class LottoApp:
             self._show_number(self.current_numbers[idx])
 
     def _get_history_draws(self, limit=20):
-        """Pobierz ostatnie wylosowania z bazy."""
         if not self.history_db:
             return []
         try:
-            cursor = self.history_db.cursor()
-            cursor.execute(
+            rows = self.history_db.execute(
                 "SELECT draw_date, numbers FROM draws ORDER BY id DESC LIMIT ?",
-                (limit,)
-            )
+                (limit,)).fetchall()
             draws = []
-            for row in cursor.fetchall():
-                date, numbers_json = row
+            for date, nj in rows:
                 try:
-                    numbers = json.loads(numbers_json)
-                    draws.append((date, numbers))
+                    draws.append((date, json.loads(nj)))
                 except Exception:
                     pass
             draws.reverse()
@@ -768,7 +739,6 @@ class LottoApp:
 
     def _show_history(self):
         draws = self._get_history_draws(50)
-
         if not draws:
             self.set_status("Brak danych historycznych w bazie", "warning")
             messagebox.showinfo("Historia", "Brak danych historycznych w bazie")
@@ -793,32 +763,26 @@ class LottoApp:
         scrollbar.config(command=text.yview)
         scrollbar.pack(side=RIGHT, fill=Y)
 
-        content = "Data                | Liczby\n"
-        content += "-" * 50 + "\n"
+        content = "Data                | Liczby\n" + "-" * 50 + "\n"
         for date, numbers in draws:
-            numbers_str = " ".join(f"{n:2d}" for n in numbers)
-            content += f"{date:20s} | {numbers_str}\n"
+            content += f"{date:20s} | {' '.join(f'{n:2d}' for n in numbers)}\n"
 
         text.insert(END, content)
         text.config(state=DISABLED)
-
         Button(hist_win, text="Zamknij", command=hist_win.destroy,
-              bg="#334155", fg="white").pack(pady=5)
+               bg="#334155", fg="white").pack(pady=5)
 
     def _show_number(self, n):
         self.lbl_num.config(text=str(n))
 
         if not self.stats:
-            details = "Brak wczytanych statystyk.\nU\u017cyj przycisku 'Wczytaj statystyki'."
+            details = "Brak wczytanych statystyk.\nU\u017cyj menu 'Dane' \u2192 Wczytaj statystyki."
         else:
             d = self.stats.number_stats(n)
-            streak_txt = "brak danych"
-            if d["streak"]:
-                streak_txt = f"{d['streak']['losowan_temu']} los. temu | {d['streak']['status']}"
-
-            roll_txt = "brak danych"
-            if d["rolling_current"] is not None:
-                roll_txt = f"{d['rolling_current']:.1f} (min {d['rolling_min']:.1f}, max {d['rolling_max']:.1f})"
+            streak_txt = (f"{d['streak']['losowan_temu']} los. temu | {d['streak']['status']}"
+                          if d["streak"] else "brak danych")
+            roll_txt = (f"{d['rolling_current']:.1f} (min {d['rolling_min']:.1f}, max {d['rolling_max']:.1f})"
+                        if d["rolling_current"] is not None else "brak danych")
 
             details = (
                 f"Status:      {d['status']}\n"
@@ -827,16 +791,13 @@ class LottoApp:
                 f"Rolling100:  {roll_txt}\n"
                 f"Cold streak: {streak_txt}\n\n"
             )
-
             if d["last_years"]:
-                details += "Ostatnie lata:\n"
-                details += "  ".join(f"{y}: {v}" for y, v in d["last_years"]) + "\n\n"
+                details += "Ostatnie lata:\n" + "  ".join(f"{y}: {v}" for y, v in d["last_years"]) + "\n\n"
             else:
                 details += "Brak danych rocznych.\n\n"
-
             if d["pairs"]:
-                details += "TOP pary:\n"
-                details += "\n".join(f"  {p['para']} - {p['wystapienia']} razy" for p in d["pairs"])
+                details += "TOP pary:\n" + "\n".join(
+                    f"  {p['para']} - {p['wystapienia']} razy" for p in d["pairs"])
             else:
                 details += "Brak danych o parach."
 
