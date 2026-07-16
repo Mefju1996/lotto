@@ -11,7 +11,34 @@ import threading
 import time
 
 APP_TITLE = "Generator Lotto - Tkinter"
-ROOT_DIR = Path(__file__).resolve().parents[1]
+
+
+def get_root_dir() -> Path:
+    """Zwraca ROOT_DIR zarówno dla .py jak i .exe (PyInstaller)."""
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parents[1]
+
+
+def get_python_executable() -> str:
+    """Zwraca ścieżkę do python.exe — działa i dla .py i dla .exe (PyInstaller)."""
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).parent
+        for candidate in [
+            exe_dir / "python.exe",
+            exe_dir / "_internal" / "python.exe",
+        ]:
+            if candidate.exists():
+                return str(candidate)
+        import shutil
+        py = shutil.which("python") or shutil.which("python3")
+        if py:
+            return py
+        raise RuntimeError("Nie znaleziono python.exe obok aplikacji!")
+    return sys.executable
+
+
+ROOT_DIR = get_root_dir()
 DATA_DIR = ROOT_DIR / "data"
 ANALYSIS_DIR = ROOT_DIR / "analysis"
 DEFAULT_HISTORY_SHEET = "Arkusz1"
@@ -304,11 +331,6 @@ class LottoApp:
             return neutral
 
     def set_status(self, msg: str, level: str = "info", auto_reset: bool = True) -> None:
-        """
-        Wyświetla komunikat w status barze.
-        level: 'info' | 'success' | 'warning' | 'error'
-        auto_reset: po 5s wraca do 'Gotowy' (tylko info/success).
-        """
         color = _STATUS_COLORS.get(level, _STATUS_COLORS["info"])
         self.status_bar.config(text=f"  {msg}", foreground=color)
 
@@ -322,36 +344,30 @@ class LottoApp:
             )
 
     def _build_ui(self):
-        # Title
         Label(self.root, text="Generator Lotto - Tkinter",
               font=("Arial", 20, "bold"), bg="#0b1220", fg="white").pack(pady=10)
 
-        # ── PASEK NARZĘDZI (uproszczony) ──────────────────────────────
         btn_frame = Frame(self.root, bg="#0b1220")
         btn_frame.pack(pady=5, fill=X, padx=10)
 
-        # 1. Losuj — najważniejszy, wyeksponowany
         Button(btn_frame, text="\U0001f3b1  Losuj", command=self._draw,
                bg="#0ea5e9", fg="white", font=("Arial", 10, "bold"), width=14,
                relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
-        # 2. Aktualizuj — często używany, wyeksponowany
         Button(btn_frame, text="\u27f3  Aktualizuj", command=self._update_results,
                bg="#059669", fg="white", font=("Arial", 10, "bold"), width=14,
                relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
-        # Separator wizualny
         ttk.Separator(btn_frame, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=8, pady=4)
 
-        # 3. Menu rozwijane "▾ Dane" — rzadziej używane opcje
         self._data_menu = Menu(self.root, tearoff=0, bg="#1f2937", fg="white",
                                activebackground="#374151", activeforeground="white",
                                relief=FLAT, bd=0)
         self._data_menu.add_command(label="\U0001f4ca  Wczytaj statystyki",
                                     command=self._pick_stats)
-        self._data_menu.add_command(label="\U0001f4c2  Plik historii — zmień",
+        self._data_menu.add_command(label="\U0001f4c2  Plik historii \u2014 zmie\u0144",
                                     command=self._pick_history)
-        self._data_menu.add_command(label="\U0001f4dc  Historia losowań",
+        self._data_menu.add_command(label="\U0001f4dc  Historia losowa\u0144",
                                     command=self._show_history)
         self._data_menu.add_separator()
         self._data_menu.add_command(label="\U0001f5c4  Baza danych",
@@ -370,15 +386,12 @@ class LottoApp:
         )
         self._btn_data.pack(side=LEFT, padx=5)
 
-        # Main content
         content_frame = Frame(self.root, bg="#0b1220")
         content_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
-        # Left panel
         left_frame = Frame(content_frame, bg="#0b1220")
         left_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
 
-        # Balls
         balls_frame = Frame(left_frame, bg="#0b1220")
         balls_frame.pack(pady=10)
 
@@ -390,7 +403,6 @@ class LottoApp:
             lbl.bind("<Button-1>", lambda e, idx=i: self._on_ball_clicked(idx))
             self.ball_labels.append(lbl)
 
-        # Stats cards
         cards_frame = Frame(left_frame, bg="#0b1220")
         cards_frame.pack(pady=10, fill=X)
 
@@ -403,7 +415,6 @@ class LottoApp:
             val.pack(pady=5)
             self.stat_cards[title] = val
 
-        # Range bars
         for title, vmin, vmax, gmin, gmax in [
             ("Suma", 80, 220, 110, 185),
             ("Spread", 8, 48, 31, 42)
@@ -414,7 +425,6 @@ class LottoApp:
                  font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
             self.stat_cards[f"{title}_label"] = frame.winfo_children()[0]
 
-        # Differences
         diff_frame = Frame(left_frame, bg="#1f2937", relief=RIDGE, bd=1)
         diff_frame.pack(pady=5, fill=BOTH, expand=True)
         Label(diff_frame, text="R\u00f3\u017cnice mi\u0119dzy kolejnymi liczbami",
@@ -424,7 +434,6 @@ class LottoApp:
         self.diff_text.pack(fill=BOTH, expand=True, padx=5, pady=5)
         self.diff_text.config(state=DISABLED)
 
-        # Right panel
         right_frame = Frame(content_frame, bg="#111827", relief=RIDGE, bd=1)
         right_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
 
@@ -440,7 +449,6 @@ class LottoApp:
         self.details_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.details_text.config(state=DISABLED)
 
-        # ── STATUS BAR ─────────────────────────────────────────────────
         ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, side=BOTTOM)
         self.status_bar = ttk.Label(
             self.root,
@@ -455,7 +463,6 @@ class LottoApp:
         self.status_bar.pack(side=BOTTOM, fill=X)
 
     def _update_labels(self):
-        """Aktualizuje status bar skróconą informacją o stanie danych."""
         if self.stats and self.history_db:
             self.set_status(
                 f"Statystyki: {self.stats_path.name}  |  Historia: {self.history_path.name}",
@@ -467,11 +474,10 @@ class LottoApp:
                 "warning", auto_reset=False
             )
         else:
-            self.set_status("Brak statystyk — użyj menu 'Dane' → Wczytaj statystyki",
+            self.set_status("Brak statystyk \u2014 u\u017cyj menu 'Dane' \u2192 Wczytaj statystyki",
                             "warning", auto_reset=False)
 
     def _generate_stats_in_background(self):
-        """Generuj statystyki w osobnym wątku."""
         def run():
             try:
                 self.root.after(0, lambda: self.set_status(
@@ -482,7 +488,7 @@ class LottoApp:
                     script_path = ROOT_DIR / "scripts" / "generate_lotto_stats.py"
 
                 result = subprocess.run(
-                    [sys.executable, str(script_path)],
+                    [get_python_executable(), str(script_path)],
                     capture_output=True,
                     text=True,
                     timeout=300
@@ -493,36 +499,35 @@ class LottoApp:
                     if latest:
                         self.root.after(100, lambda p=latest: self._load_stats(p))
                         self.root.after(200, lambda: self.set_status(
-                            "Statystyki wygenerowane pomyślnie", "success"))
+                            "Statystyki wygenerowane pomy\u015blnie", "success"))
                     else:
                         self.root.after(0, lambda: self.set_status(
                             "Statystyki: plik nie znaleziony po generowaniu", "error", auto_reset=False))
                 else:
-                    err = result.stderr[:200] if result.stderr else "Nieznany błąd"
+                    err = result.stderr[:200] if result.stderr else "Nieznany b\u0142\u0105d"
                     self.root.after(0, lambda e=err: self.set_status(
-                        f"Błąd generowania statystyk: {e}", "error", auto_reset=False))
+                        f"B\u0142\u0105d generowania statystyk: {e}", "error", auto_reset=False))
             except subprocess.TimeoutExpired:
                 self.root.after(0, lambda: self.set_status(
                     "Timeout przy generowaniu statystyk", "error", auto_reset=False))
             except Exception as e:
                 self.root.after(0, lambda ex=e: self.set_status(
-                    f"Błąd statystyk: {ex}", "error", auto_reset=False))
+                    f"B\u0142\u0105d statystyk: {ex}", "error", auto_reset=False))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _update_results(self):
-        """Aktualizuj wyniki lotto z megalotto.pl (fallback: lotto.pl)."""
         def run():
             try:
                 self.root.after(0, lambda: self.set_status(
-                    "Aktualizacja wyników lotto...", "warning", auto_reset=False))
+                    "Aktualizacja wynik\u00f3w lotto...", "warning", auto_reset=False))
 
                 script_path = ROOT_DIR / "scripts" / "scraper_megalotto.py"
                 if not script_path.exists():
                     script_path = ROOT_DIR / "scripts" / "update_lotto_results.py"
 
                 result = subprocess.run(
-                    [sys.executable, str(script_path), "--update-xlsx"],
+                    [get_python_executable(), str(script_path), "--update-xlsx"],
                     capture_output=True,
                     text=True,
                     timeout=120
@@ -531,40 +536,38 @@ class LottoApp:
                 if result.returncode == 0:
                     self.root.after(0, self._reload_history_main_thread)
                     self.root.after(100, lambda: self.set_status(
-                        "Wyniki lotto zaktualizowane pomyślnie", "success"))
+                        "Wyniki lotto zaktualizowane pomy\u015blnie", "success"))
                     self.root.after(300, self._generate_stats_in_background)
                 else:
-                    error_msg = result.stderr[:200] if result.stderr else "Nieznany błąd"
+                    error_msg = result.stderr[:200] if result.stderr else "Nieznany b\u0142\u0105d"
                     self.root.after(0, self._update_labels)
                     self.root.after(0, lambda e=error_msg: self.set_status(
-                        f"Błąd aktualizacji: {e}", "error", auto_reset=False))
+                        f"B\u0142\u0105d aktualizacji: {e}", "error", auto_reset=False))
                     self.root.after(100, lambda e=error_msg: messagebox.showerror(
-                        "Błąd", f"Nie udało się zaktualizować wyników:\n{e}"))
+                        "B\u0142\u0105d", f"Nie uda\u0142o si\u0119 zaktualizowa\u0107 wynik\u00f3w:\n{e}"))
             except subprocess.TimeoutExpired:
                 self.root.after(0, self._update_labels)
                 self.root.after(0, lambda: self.set_status(
-                    "Timeout — aktualizacja trwała zbyt długo", "error", auto_reset=False))
+                    "Timeout \u2014 aktualizacja trwa\u0142a zbyt d\u0142ugo", "error", auto_reset=False))
                 self.root.after(100, lambda: messagebox.showerror(
-                    "Timeout", "Aktualizacja trwała zbyt długo"))
+                    "Timeout", "Aktualizacja trwa\u0142a zbyt d\u0142ugo"))
             except Exception as e:
                 self.root.after(0, self._update_labels)
                 self.root.after(0, lambda ex=e: self.set_status(
-                    f"Błąd aktualizacji: {ex}", "error", auto_reset=False))
+                    f"B\u0142\u0105d aktualizacji: {ex}", "error", auto_reset=False))
                 self.root.after(100, lambda ex=e: messagebox.showerror(
-                    "Błąd", f"Błąd aktualizacji: {ex}"))
+                    "B\u0142\u0105d", f"B\u0142\u0105d aktualizacji: {ex}"))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _reload_history_main_thread(self):
-        """Zamknij i ponownie otwórz połączenie SQLite w głównym wątku."""
         self._load_history()
         self._update_labels()
 
     def _show_database(self):
-        """Wyświetl zawartość bazy danych w tabelce."""
         if not self.history_db:
-            self.set_status("Baza danych nie jest załadowana", "warning")
-            messagebox.showwarning("Baza danych", "Baza danych nie jest załadowana")
+            self.set_status("Baza danych nie jest za\u0142adowana", "warning")
+            messagebox.showwarning("Baza danych", "Baza danych nie jest za\u0142adowana")
             return
 
         try:
@@ -572,11 +575,11 @@ class LottoApp:
             cursor.execute("SELECT id, draw_date, numbers FROM draws ORDER BY id DESC LIMIT 100")
             rows = cursor.fetchall()
         except Exception as e:
-            self.set_status(f"Błąd odczytu bazy: {e}", "error")
-            messagebox.showerror("Błąd", f"Nie mogę odczytać bazy: {e}")
+            self.set_status(f"B\u0142\u0105d odczytu bazy: {e}", "error")
+            messagebox.showerror("B\u0142\u0105d", f"Nie mog\u0119 odczyta\u0107 bazy: {e}")
             return
 
-        self.set_status(f"Otwarto widok bazy ({len(rows)} rekordów)", "info")
+        self.set_status(f"Otwarto widok bazy ({len(rows)} rekord\u00f3w)", "info")
 
         db_win = Toplevel(self.root)
         db_win.title("Baza danych - Wyniki Lotto")
@@ -584,7 +587,7 @@ class LottoApp:
         db_win.configure(bg="#0b1220")
 
         Label(Frame(db_win, bg="#0b1220").pack(pady=5) or db_win,
-              text=f"Wyświetlono 100 ostatnich losowań (total: {len(rows)})",
+              text=f"Wy\u015bwietlono 100 ostatnich losowa\u0144 (total: {len(rows)})",
               font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
 
         tree_frame = Frame(db_win, bg="#0b1220")
@@ -645,8 +648,8 @@ class LottoApp:
                 self.set_status(f"Dane wyeksportowane: {path}", "success")
                 messagebox.showinfo("Sukces", f"Dane wyeksportowane do:\n{path}")
             except Exception as e:
-                self.set_status(f"Błąd eksportu: {e}", "error")
-                messagebox.showerror("Błąd", f"Nie mogę eksportować: {e}")
+                self.set_status(f"B\u0142\u0105d eksportu: {e}", "error")
+                messagebox.showerror("B\u0142\u0105d", f"Nie mog\u0119 eksportowa\u0107: {e}")
 
         Button(db_win, text="Eksportuj do CSV", command=export_to_csv,
                bg="#334155", fg="white", font=("Arial", 10)).pack(pady=5)
@@ -660,7 +663,7 @@ class LottoApp:
         if latest:
             self._load_stats(latest)
         else:
-            self.set_status("Statystyki nie znalezione — generuję...", "warning", auto_reset=False)
+            self.set_status("Statystyki nie znalezione \u2014 generuj\u0119...", "warning", auto_reset=False)
             self._generate_stats_in_background()
 
         self._update_labels()
@@ -672,17 +675,16 @@ class LottoApp:
             self.stats_path = Path(path)
             self.freq_map = {k: v["procent"] for k, v in self.stats.frequency.items()}
             self.status_map = {i: self.stats.status_short(i) for i in range(1, 50)}
-            self.set_status(f"Załadowano statystyki: {Path(path).name}", "success")
+            self.set_status(f"Za\u0142adowano statystyki: {Path(path).name}", "success")
         except Exception as exc:
             self.stats = None
             self.freq_map = {i: 0.0 for i in range(1, 50)}
             self.status_map = {i: "" for i in range(1, 50)}
-            self.set_status(f"Błąd statystyk: {exc}", "error", auto_reset=False)
-            messagebox.showerror("Błąd statystyk", str(exc))
+            self.set_status(f"B\u0142\u0105d statystyk: {exc}", "error", auto_reset=False)
+            messagebox.showerror("B\u0142\u0105d statystyk", str(exc))
         self._update_labels()
 
     def _load_history(self):
-        """Otwiera połączenie SQLite — MUSI być wywołane z głównego wątku."""
         if self.history_db:
             try:
                 self.history_db.close()
@@ -697,10 +699,10 @@ class LottoApp:
                 str(self.history_path), check_same_thread=False)
             count = self.history_db.execute(
                 "SELECT COUNT(*) FROM draws").fetchone()[0]
-            self.set_status(f"Historia załadowana: {count} losowań", "success")
+            self.set_status(f"Historia za\u0142adowana: {count} losowa\u0144", "success")
         except Exception as e:
             self.history_db = None
-            self.set_status(f"Błąd bazy historii: {e}", "error", auto_reset=False)
+            self.set_status(f"B\u0142\u0105d bazy historii: {e}", "error", auto_reset=False)
 
     def _pick_stats(self):
         start = str(self.stats_path.parent if self.stats_path else ROOT_DIR)
@@ -788,7 +790,7 @@ class LottoApp:
             draws.reverse()
             return draws
         except Exception as e:
-            self.set_status(f"Błąd pobierania historii: {e}", "error")
+            self.set_status(f"B\u0142\u0105d pobierania historii: {e}", "error")
             return []
 
     def _show_history(self):
@@ -798,10 +800,10 @@ class LottoApp:
             messagebox.showinfo("Historia", "Brak danych historycznych w bazie")
             return
 
-        self.set_status(f"Otwarto historię ({len(draws)} losowań)", "info")
+        self.set_status(f"Otwarto histori\u0119 ({len(draws)} losowa\u0144)", "info")
 
         hist_win = Toplevel(self.root)
-        hist_win.title("Historia wylosowań")
+        hist_win.title("Historia wylosowa\u0144")
         hist_win.geometry("600x500")
         hist_win.configure(bg="#0b1220")
 
