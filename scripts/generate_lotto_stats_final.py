@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generator statystyk Lotto - WERSJA POPRAWIONA
+Generator statystyk Lotto - WERSJA POPRAWIONA + ZSYNCHRONIZOWANA ZE SCRAPEREM
 Analizuje bazę historycznych wyników i generuje raport XLSX z wykresami PNG
 
 Użycie:
-    python generate_lotto_stats.py
+    python scripts/generate_lotto_stats_final.py
 
 Wymagania:
-    - wyniki_lotto.xlsx w tym samym katalogu
-    - pandas, matplotlib, openpyxl
+    - data/wyniki_lotto.xlsx (wypełniany przez scripts/scraper_megalotto.py)
+    - pandas, matplotlib, openpyxl, numpy
 """
 
 import pandas as pd
@@ -18,7 +18,7 @@ from collections import Counter
 from itertools import combinations
 import numpy as np
 import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -34,6 +34,15 @@ print("="*70)
 print("\n1. Wczytywanie danych z pliku wyniki_lotto.xlsx...")
 file = DATA_DIR / 'wyniki_lotto.xlsx'
 df = pd.read_excel(file, engine='openpyxl', sheet_name='Arkusz1')
+
+# FIX #1: Normalizuj kolumnę 'data' do datetime (scraper zapisuje jako date/datetime)
+if 'data' in df.columns:
+    df['data'] = pd.to_datetime(df['data'], errors='coerce')
+
+# Upewnij się, że dane posortowane od najnowszego (scraper zapisuje malejąco, ale dla pewności)
+if 'data' in df.columns and df['data'].notna().any():
+    df = df.sort_values('data', ascending=False).reset_index(drop=True)
+
 print(f"   ✓ Wczytano {len(df)} losowań")
 
 liczby_cols = ['pierwsza', 'druga', 'trzecia', 'czwarta', 'piąta', 'szósta']
@@ -69,6 +78,9 @@ df['parzyste'] = df[liczby_cols].apply(count_parzyste, axis=1)
 df['nieparzyste'] = 6 - df['parzyste']
 df['niskie'] = df[liczby_cols].apply(count_niskie, axis=1)
 df['wysokie'] = 6 - df['niskie']
+
+# FIX #2: Kolumna 'Suma' musi być obliczona TUTAJ, przed df_recent i przed sekcją sumy
+df['Suma'] = df[liczby_cols].sum(axis=1)
 
 df_recent = df.head(50).copy()
 wszystkie_liczby_recent = df_recent[liczby_cols].values.flatten()
@@ -246,6 +258,7 @@ spread_detail.index.name = 'Ranking'
 # ZAKŁADKA 9 & 10: SUMA LICZB
 # ============================================================
 print("\n7. Generowanie statystyk sum...")
+# FIX #2: df['Suma'] już obliczona wcześniej — używamy bezpośrednio
 suma_grouped = df.groupby('Suma').size().reset_index(name='Liczba_losowan')
 suma_grouped['Procent'] = round(suma_grouped['Liczba_losowan'] / len(df) * 100, 2)
 
@@ -269,7 +282,7 @@ suma_top.index += 1
 suma_top.index.name = 'Ranking'
 
 # ============================================================
-# ZAKŁADKA 11: WALIDACJA REGUŁ ALGORYTMU
+# ZAKŁADKA 10: WALIDACJA REGUŁ ALGORYTMU
 # ============================================================
 print("\n8. Walidacja reguł algorytmu...")
 def check_rules(row):
@@ -325,7 +338,7 @@ plt.close()
 print("   ✓ Wygenerowano wykres_walidacja.png")
 
 # ============================================================
-# ZAKŁADKA 12: OSTATNIE 50 LOSOWAŃ - HOT NUMBERS
+# ZAKŁADKA 11: OSTATNIE 50 LOSOWAŃ - HOT NUMBERS
 # ============================================================
 print("\n9. Generowanie statystyk dla ostatnich 50 losowań...")
 
@@ -360,7 +373,7 @@ plt.close()
 print("   ✓ Wygenerowano wykres_hot_recent50.png")
 
 # ============================================================
-# ZAKŁADKA 13: STATYSTYKI PORÓWNAWCZE (OSTATNIE 50 vs CAŁA HISTORIA)
+# ZAKŁADKA 12: STATYSTYKI PORÓWNAWCZE (OSTATNIE 50 vs CAŁA HISTORIA)
 # ============================================================
 print("\n10. Generowanie statystyk porównawczych...")
 
@@ -369,7 +382,7 @@ try:
     najczestszy_parz_all = df.groupby(['parzyste', 'nieparzyste']).size().idxmax()
     najczestszy_nh_recent = df_recent.groupby(['niskie', 'wysokie']).size().idxmax()
     najczestszy_nh_all = df.groupby(['niskie', 'wysokie']).size().idxmax()
-except:
+except Exception:
     najczestszy_parz_recent = 'N/A'
     najczestszy_parz_all = 'N/A'
     najczestszy_nh_recent = 'N/A'
@@ -385,7 +398,6 @@ recent_stats = pd.DataFrame({
     'Ostatnie_50': [
         round(df_recent['Suma'].mean(), 2),
         round(df_recent['spread'].mean(), 2),
-        # POPRAWKA: wyciągamy wartości jako int i formatujemy string
         f"{int(df_recent.groupby(['parzyste','nieparzyste']).size().idxmax()[0])}P-{int(df_recent.groupby(['parzyste','nieparzyste']).size().idxmax()[1])}N",
         f"{int(df_recent.groupby(['niskie','wysokie']).size().idxmax()[0])}L-{int(df_recent.groupby(['niskie','wysokie']).size().idxmax()[1])}H"
     ],
@@ -397,9 +409,8 @@ recent_stats = pd.DataFrame({
     ]
 })
 
-
 # ============================================================
-# ZAKŁADKA 14: COLD STREAKS
+# ZAKŁADKA 13: COLD STREAKS
 # ============================================================
 print("\n11. Generowanie statystyk cold streaks...")
 
@@ -438,8 +449,9 @@ print("   ✓ Wygenerowano wykres_cold_streaks.png")
 
 # ============================================================
 # ZAKŁADKA 14: NAJCZĘSTSZE TRÓJKI LICZB
+# FIX #3: Zmieniono etykietę print z "\n14." na "\n12b." (kolizja z cold_streaks)
 # ============================================================
-print("\n14. Generowanie statystyk trójek liczb...")
+print("\n12b. Generowanie statystyk trójek liczb...")
 trojki = []
 for _, row in df[liczby_cols].iterrows():
     nums = sorted(row.values)
@@ -533,16 +545,20 @@ for num in tracked_numbers:
 print("   ✓ Wygenerowano wykres_rolling.png")
 
 # ============================================================
-# ZAKŁADKA 17: HEATMAPA WG ROKU — generowanie dat syntetycznie
+# ZAKŁADKA 17: HEATMAPA WG ROKU
+# FIX #4: Używamy rzeczywistej kolumny 'data' ze scrappera jeśli dostępna,
+#         fallback na daty syntetyczne (co 2 dni) jeśli brak.
 # ============================================================
-print("\n17. Generowanie heatmapy wg roku (daty syntetyczne, co 2 dni)...")
+print("\n17. Generowanie heatmapy wg roku...")
 
-# Generujemy daty wstecz od dziś — wiersz 0 = najnowsze losowanie
-from datetime import date, timedelta
-
-base_date = date.today()
-df['data_syntetyczna'] = [base_date - timedelta(days=2 * i) for i in range(len(df))]
-df['rok'] = df['data_syntetyczna'].apply(lambda d: d.year)
+if 'data' in df.columns and df['data'].notna().sum() > 0:
+    df['rok'] = df['data'].dt.year
+    print("   ✓ Używam rzeczywistych dat z kolumny 'data'")
+else:
+    base_date = date.today()
+    df['data_syntetyczna'] = [base_date - timedelta(days=2 * i) for i in range(len(df))]
+    df['rok'] = df['data_syntetyczna'].apply(lambda d: d.year)
+    print("   ℹ Brak kolumny 'data' — używam dat syntetycznych (co 2 dni wstecz od dziś)")
 
 heatmap_data = {}
 for num in range(1, 50):
@@ -551,19 +567,18 @@ for num in range(1, 50):
 
 heatmap_df = pd.DataFrame(heatmap_data).T
 heatmap_df.index.name = 'Liczba'
-# Kolumny (lata) od najstarszego do najnowszego
 heatmap_df = heatmap_df[sorted(heatmap_df.columns)]
 
+title_suffix = '' if ('data' in df.columns and df['data'].notna().sum() > 0) else '\n(daty syntetyczne: co 2 dni wstecz od dziś)'
 fig, ax = plt.subplots(figsize=(max(12, len(heatmap_df.columns)), 14))
 im = ax.imshow(heatmap_df.values, aspect='auto', cmap='YlOrRd')
 ax.set_xticks(range(len(heatmap_df.columns)))
 ax.set_xticklabels(heatmap_df.columns, rotation=45, ha='right', fontsize=9)
 ax.set_yticks(range(len(heatmap_df.index)))
 ax.set_yticklabels(heatmap_df.index, fontsize=8)
-ax.set_xlabel('Rok (przybliżony)', fontsize=12)
+ax.set_xlabel('Rok', fontsize=12)
 ax.set_ylabel('Liczba', fontsize=12)
-ax.set_title('Heatmapa wystąpień liczb wg roku\n(daty wygenerowane syntetycznie: co 2 dni wstecz od dziś)',
-             fontsize=13, fontweight='bold')
+ax.set_title(f'Heatmapa wystąpień liczb wg roku{title_suffix}', fontsize=13, fontweight='bold')
 plt.colorbar(im, ax=ax, label='Liczba wystąpień w roku')
 plt.tight_layout()
 plt.savefig(out('wykres_heatmapa_rok.png'), dpi=150, bbox_inches='tight')
@@ -580,10 +595,8 @@ pozycje_stats = pd.DataFrame({
 }).T
 pozycje_stats.index.name = 'Pozycja'
 
-# Średnia wartość na każdej pozycji
 srednie_pozycji = df[liczby_cols].mean()
 
-# Dla każdej liczby - na której pozycji najczęściej się pojawia
 pozycja_najczesciej = []
 for num in range(1, 50):
     counts = [
@@ -600,7 +613,6 @@ for num in range(1, 50):
 
 pozycja_df = pd.DataFrame(pozycja_najczesciej)
 
-# Wykres: średnia wartość na pozycji
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
 ax1.bar(range(1, 7), srednie_pozycji.values, color='steelblue', alpha=0.7)
@@ -612,7 +624,6 @@ for i, v in enumerate(srednie_pozycji.values):
     ax1.text(i+1, v + 0.3, f'{v:.1f}', ha='center', fontsize=10)
 ax1.grid(axis='y', alpha=0.3)
 
-# Boxplot pozycji
 ax2.boxplot([df[col].values for col in liczby_cols],
             labels=[f'P{i+1}' for i in range(6)],
             patch_artist=True,
@@ -685,13 +696,11 @@ print("\n20. Szukanie prawie duplikatów (≥5 wspólnych liczb)...")
 draws_array = df[liczby_cols].values  # shape (N, 6)
 prawie_duplikaty = []
 
-# Kodujemy każde losowanie jako zbiór bitów (49-bitowa maska)
 masks = np.zeros(len(draws_array), dtype=np.int64)
 for i, row in enumerate(draws_array):
     for num in row:
         masks[i] |= (1 << int(num))
 
-# Porównujemy pary tylko w oknie 1000 ostatnich losowań
 window_dup = min(1000, len(masks))
 for i in range(window_dup):
     for j in range(i + 1, window_dup):
@@ -718,9 +727,6 @@ else:
 
 print(f"   ✓ Znaleziono {len(prawie_duplikaty)} par z ≥5 wspólnymi liczbami")
 
-# Wykres: histogram wspólnych liczb (dla próbki)
-wspolne_counts = Counter()
-# Wykres: histogram wspólnych liczb (dla próbki) — używa draws_array
 sample_size = min(300, len(draws_array))
 wspolne_counts = Counter()
 for i in range(sample_size):
@@ -783,6 +789,7 @@ plt.tight_layout()
 plt.savefig(out('wykres_sliding_window.png'), dpi=150, bbox_inches='tight')
 plt.close()
 print("   ✓ Wygenerowano wykres_sliding_window.png")
+
 # ============================================================
 # ZAKŁADKA 22: GAP ANALYSIS — odstępy między wystąpieniami
 # ============================================================
@@ -792,19 +799,14 @@ gap_stats = []
 gap_detail = []
 
 for num in range(1, 50):
-    # Indeksy wierszy gdzie liczba wystąpiła (0 = najnowsze losowanie)
     indices = np.where(
         df[liczby_cols].apply(lambda row: num in row.values, axis=1).values
     )[0].tolist()
-    # indices jest już posortowane rosnąco (0, 5, 12, ...)
-    # NIE odwracamy — liczymy różnice bezpośrednio
     if len(indices) < 2:
         continue
 
     gaps = [indices[i+1] - indices[i] for i in range(len(indices) - 1)]
-    # gaps są teraz dodatnie: ile losowań między kolejnymi wystąpieniami
-
-    aktualny_gap = indices[0]  # ile losowań temu ostatnio wystąpiła (indeks 0 = najnowsze)
+    aktualny_gap = indices[0]
 
     gap_stats.append({
         'Liczba': num,
@@ -817,11 +819,7 @@ for num in range(1, 50):
         'Aktualny_gap': aktualny_gap
     })
 
-    for g in gaps[:200]:
-        gap_detail.append({'Liczba': num, 'Gap': g})
-
-
-    # Szczegóły do exportu (pierwsze 200 gapów)
+    # FIX #5: usunięto zduplikowany blok gap_detail.append (był dwa razy)
     for g in gaps[:200]:
         gap_detail.append({'Liczba': num, 'Gap': g})
 
@@ -831,7 +829,6 @@ gap_stats_df.index.name = 'Ranking'
 
 gap_detail_df = pd.DataFrame(gap_detail)
 
-# Wykres 1: Średni odstęp dla każdej liczby
 fig, axes = plt.subplots(2, 1, figsize=(14, 12))
 
 ax1 = axes[0]
@@ -848,7 +845,6 @@ ax1.legend()
 ax1.grid(axis='y', alpha=0.3)
 ax1.tick_params(axis='x', rotation=90)
 
-# Wykres 2: Min/Max odstęp jako error bar
 ax2 = axes[1]
 x = range(len(gap_stats_df))
 srednie = gap_stats_df['Śr_odstęp'].values
@@ -871,7 +867,6 @@ plt.savefig(out('wykres_gap_analysis.png'), dpi=150, bbox_inches='tight')
 plt.close()
 print("   ✓ Wygenerowano wykres_gap_analysis.png")
 
-# Wykres 3: Histogram rozkładu gapów (wszystkie liczby łącznie)
 plt.figure(figsize=(12, 5))
 all_gaps = gap_detail_df['Gap'].values
 plt.hist(all_gaps, bins=range(1, int(all_gaps.max())+2), color='teal',
@@ -892,16 +887,12 @@ print("   ✓ Wygenerowano wykres_gap_histogram.png")
 # ZAKŁADKA 23: ANTY-TRÓJKI — najrzadziej/nigdy nie wystąpiły
 # ============================================================
 print("\n23. Generowanie anty-trójek...")
-from itertools import combinations
 
-# Wszystkie możliwe trójki (18 424 kombinacji)
 wszystkie_trojki = set(
     f"{a}-{b}-{c}"
     for a, b, c in combinations(range(1, 50), 3)
 )
 
-# Trójki które już mamy z zakładki 14 (counter_trojki)
-# Uzupełniamy brakujące o 0 wystąpień
 antytrojki_df = pd.DataFrame([
     {'Trójka': t, 'Wystąpienia': counter_trojki.get(t, 0)}
     for t in wszystkie_trojki
@@ -909,16 +900,14 @@ antytrojki_df = pd.DataFrame([
 antytrojki_df.index += 1
 antytrojki_df.index.name = 'Ranking'
 
-# Podział na grupy
 nigdy = antytrojki_df[antytrojki_df['Wystąpienia'] == 0]
 raz   = antytrojki_df[antytrojki_df['Wystąpienia'] == 1]
 dwa   = antytrojki_df[antytrojki_df['Wystąpienia'] == 2]
 
-print(f"   ✓ Nigdy nie wystąpiły:      {len(nigdy):>6} trójek ({len(nigdy)/18424*100:.1f}%)")
-print(f"   ✓ Wystąpiły dokładnie 1 raz: {len(raz):>6} trójek ({len(raz)/18424*100:.1f}%)")
-print(f"   ✓ Wystąpiły dokładnie 2 razy:{len(dwa):>6} trójek ({len(dwa)/18424*100:.1f}%)")
+print(f"   ✓ Nigdy nie wystąpiły:       {len(nigdy):>6} trójek ({len(nigdy)/18424*100:.1f}%)")
+print(f"   ✓ Wystąpiły dokładnie 1 raz:  {len(raz):>6} trójek ({len(raz)/18424*100:.1f}%)")
+print(f"   ✓ Wystąpiły dokładnie 2 razy: {len(dwa):>6} trójek ({len(dwa)/18424*100:.1f}%)")
 
-# Wykres: rozkład liczby wystąpień trójek
 rozklad_trojki = antytrojki_df.groupby('Wystąpienia').size().reset_index(name='Liczba_trojek')
 
 plt.figure(figsize=(14, 6))
@@ -940,12 +929,12 @@ print("   ✓ Wygenerowano wykres_antytrojki_rozklad.png")
 
 # ============================================================
 # ZAPISANIE DO PLIKU XLSX
+# FIX #6: Poprawiono numer kroku z '22.' na '24.'
 # ============================================================
-print("\n22. Zapisywanie danych do pliku Excel...")
+print("\n24. Zapisywanie danych do pliku Excel...")
 output_file = out('statystyki_lotto.xlsx')
 
 with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-    # --- istniejące zakładki ---
     freq_df.to_excel(writer, sheet_name='1_Czestotliwosc', index=False)
     top_20.to_excel(writer, sheet_name='2_Hot_Numbers')
     bottom_20.to_excel(writer, sheet_name='3_Cold_Numbers')
@@ -959,7 +948,6 @@ with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
     hot_recent.to_excel(writer, sheet_name='11_Hot_Ostatnie50')
     recent_stats.to_excel(writer, sheet_name='12_Stats_Ostatnie50', index=False)
     cold_streaks_df.to_excel(writer, sheet_name='13_Cold_Streaks')
-    # --- nowe zakładki ---
     trojki_df.to_excel(writer, sheet_name='14_TOP50_Trojek')
     antypary_df.head(50).to_excel(writer, sheet_name='15_Antypary', index=False)
     rolling_export.to_excel(writer, sheet_name='16_Rolling_Freq', index=False)
