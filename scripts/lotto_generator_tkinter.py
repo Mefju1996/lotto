@@ -17,6 +17,14 @@ ANALYSIS_DIR = ROOT_DIR / "analysis"
 DEFAULT_HISTORY_SHEET = "Arkusz1"
 DEFAULT_HISTORY_DB = DATA_DIR / "lotto_history.db"
 
+# Kolory status bara
+_STATUS_COLORS = {
+    "info":    "#e5e7eb",
+    "success": "#4ade80",
+    "warning": "#fbbf24",
+    "error":   "#ef4444",
+}
+
 
 def find_latest_stats() -> Path | None:
     """Zwraca najnowszy plik statystyk z folderu analysis/ (według mtime)."""
@@ -24,7 +32,6 @@ def find_latest_stats() -> Path | None:
         return None
     candidates = list(ANALYSIS_DIR.glob("statystyki_lotto*.xlsx"))
     if not candidates:
-        # fallback: dowolny xlsx w analysis/
         candidates = list(ANALYSIS_DIR.glob("*.xlsx"))
     if not candidates:
         return None
@@ -237,10 +244,33 @@ class LottoApp:
         self.history_path = None
         self.history_sheet = DEFAULT_HISTORY_SHEET
         self.current_numbers = []
+        self._status_reset_id = None  # id after() do auto-resetu statusu
 
         # Build UI
         self._build_ui()
         self._auto_load()
+
+    # ------------------------------------------------------------------
+    # STATUS BAR
+    # ------------------------------------------------------------------
+    def set_status(self, msg: str, level: str = "info", auto_reset: bool = True) -> None:
+        """
+        Wyświetla komunikat w status barze.
+        level: 'info' | 'success' | 'warning' | 'error'
+        auto_reset: po 5s wraca do 'Gotowy' (tylko dla info/success).
+        """
+        color = _STATUS_COLORS.get(level, _STATUS_COLORS["info"])
+        self.status_bar.config(text=f"  {msg}", foreground=color)
+
+        # Anuluj poprzedni timer resetowania
+        if self._status_reset_id is not None:
+            self.root.after_cancel(self._status_reset_id)
+            self._status_reset_id = None
+
+        if auto_reset and level in ("info", "success"):
+            self._status_reset_id = self.root.after(
+                5000, lambda: self.set_status("Gotowy", "info", auto_reset=False)
+            )
 
     def _build_ui(self):
         # Title
@@ -260,12 +290,12 @@ class LottoApp:
                bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
         Button(btn_frame, text="Historia", command=self._show_history,
                bg="#334155", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="📊 Baza danych", command=self._show_database,
+        Button(btn_frame, text="\U0001f4ca Baza danych", command=self._show_database,
                bg="#6366f1", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
-        Button(btn_frame, text="⟳ Aktualizuj", command=self._update_results,
+        Button(btn_frame, text="\u27f3 Aktualizuj", command=self._update_results,
                bg="#059669", fg="white", font=("Arial", 10), width=15).pack(side=LEFT, padx=5)
 
-        # Status labels
+        # Status labels (zachowane dla kompatybilności)
         self.lbl_stats = Label(self.root, text="Statystyki: brak",
                               bg="#0b1220", fg="#a78bfa", font=("Arial", 9))
         self.lbl_stats.pack(pady=2)
@@ -321,7 +351,7 @@ class LottoApp:
         # Differences
         diff_frame = Frame(left_frame, bg="#1f2937", relief=RIDGE, bd=1)
         diff_frame.pack(pady=5, fill=BOTH, expand=True)
-        Label(diff_frame, text="Różnice między kolejnymi liczbami",
+        Label(diff_frame, text="R\u00f3\u017cnice mi\u0119dzy kolejnymi liczbami",
              bg="#1f2937", fg="white", font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
         self.diff_text = Text(diff_frame, height=4, bg="#0b1220", fg="#e5e7eb",
                              font=("Courier", 9), relief=FLAT, wrap=WORD)
@@ -332,7 +362,7 @@ class LottoApp:
         right_frame = Frame(content_frame, bg="#111827", relief=RIDGE, bd=1)
         right_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
 
-        Label(right_frame, text="Szczegóły liczby", bg="#111827", fg="white",
+        Label(right_frame, text="Szczeg\u00f3\u0142y liczby", bg="#111827", fg="white",
              font=("Arial", 14, "bold")).pack(anchor=W, padx=10, pady=5)
 
         self.lbl_num = Label(right_frame, text="--", bg="#111827", fg="#ffd166",
@@ -344,6 +374,22 @@ class LottoApp:
         self.details_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.details_text.config(state=DISABLED)
 
+        # ── STATUS BAR (na dole okna, po wszystkich innych widgetach) ──
+        separator = ttk.Separator(self.root, orient=HORIZONTAL)
+        separator.pack(fill=X, side=BOTTOM)
+
+        self.status_bar = ttk.Label(
+            self.root,
+            text="  Gotowy",
+            relief=FLAT,
+            anchor=W,
+            font=("Arial", 9),
+            foreground=_STATUS_COLORS["info"],
+            background="#111827",
+            padding=(4, 3),
+        )
+        self.status_bar.pack(side=BOTTOM, fill=X)
+
     def _update_labels(self):
         sp = str(self.stats_path) if self.stats_path else "brak"
         ok = "OK" if self.stats else "brak danych"
@@ -351,10 +397,20 @@ class LottoApp:
         hp = str(self.history_path) if self.history_path else "brak"
         self.lbl_history.config(text=f"Historia: {hp}  |  Arkusz: {self.history_sheet}")
 
+        # Aktualizuj też status bar skróconą informacją
+        if self.stats and self.history_db:
+            self.set_status(f"Statystyki: {self.stats_path.name}  |  Historia: {self.history_path.name}",
+                            "info", auto_reset=False)
+        elif self.stats:
+            self.set_status(f"Statystyki: {self.stats_path.name}  |  Historia: brak", "warning", auto_reset=False)
+        else:
+            self.set_status("Brak statystyk — użyj 'Wczytaj statystyki'", "warning", auto_reset=False)
+
     def _generate_stats_in_background(self):
-        """Generuj statystyki w osobnym wątku, załaduj wynik w głównym wątku przez root.after."""
+        """Generuj statystyki w osobnym wątku."""
         def run():
             try:
+                self.root.after(0, lambda: self.set_status("Generowanie statystyk...", "warning", auto_reset=False))
                 self.root.after(0, lambda: self.lbl_stats.config(
                     text="Statystyki: generowanie...", fg="#fbbf24"))
 
@@ -370,34 +426,41 @@ class LottoApp:
                 )
 
                 if result.returncode == 0:
-                    print("✓ Statystyki wygenerowane pomyślnie")
                     latest = find_latest_stats()
                     if latest:
                         self.root.after(100, lambda p=latest: self._load_stats(p))
+                        self.root.after(200, lambda: self.set_status(
+                            "Statystyki wygenerowane pomyślnie", "success"))
                     else:
+                        self.root.after(0, lambda: self.set_status(
+                            "Statystyki: plik nie znaleziony po generowaniu", "error", auto_reset=False))
                         self.root.after(0, lambda: self.lbl_stats.config(
                             text="Statystyki: plik nie znaleziony po generowaniu", fg="#ef4444"))
                 else:
-                    err = result.stderr[:300] if result.stderr else "Nieznany błąd"
-                    print(f"✗ Błąd generowania: {err}")
+                    err = result.stderr[:200] if result.stderr else "Nieznany błąd"
+                    self.root.after(0, lambda e=err: self.set_status(
+                        f"Błąd generowania statystyk: {e}", "error", auto_reset=False))
                     self.root.after(0, lambda: self.lbl_stats.config(
-                        text=f"Statystyki: błąd generowania", fg="#ef4444"))
+                        text="Statystyki: błąd generowania", fg="#ef4444"))
             except subprocess.TimeoutExpired:
-                print("✗ Timeout przy generowaniu statystyk")
+                self.root.after(0, lambda: self.set_status(
+                    "Timeout przy generowaniu statystyk", "error", auto_reset=False))
                 self.root.after(0, lambda: self.lbl_stats.config(
                     text="Statystyki: timeout", fg="#ef4444"))
             except Exception as e:
-                print(f"✗ Błąd: {e}")
-                self.root.after(0, lambda: self.lbl_stats.config(
-                    text=f"Statystyki: {str(e)}", fg="#ef4444"))
+                self.root.after(0, lambda ex=e: self.set_status(
+                    f"Błąd statystyk: {ex}", "error", auto_reset=False))
+                self.root.after(0, lambda ex=e: self.lbl_stats.config(
+                    text=f"Statystyki: {ex}", fg="#ef4444"))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _update_results(self):
-        """Aktualizuj wyniki lotto z megalotto.pl — wszystko w wątku pobocznym,
-        SQLite otwierany ponownie w głównym wątku przez root.after."""
+        """Aktualizuj wyniki lotto z megalotto.pl."""
         def run():
             try:
+                self.root.after(0, lambda: self.set_status(
+                    "Aktualizacja wyników lotto...", "warning", auto_reset=False))
                 self.root.after(0, lambda: self.lbl_history.config(
                     text="Historia: aktualizacja...", fg="#fbbf24"))
 
@@ -413,38 +476,41 @@ class LottoApp:
                 )
 
                 if result.returncode == 0:
-                    print("✓ Wyniki zaktualizowane")
-                    # Przeładuj bazę + etykiety w głównym wątku
                     self.root.after(0, self._reload_history_main_thread)
-                    self.root.after(200, lambda: messagebox.showinfo(
-                        "Sukces", "Wyniki lotto zostały zaktualizowane"))
-                    # Regeneruj statystyki
+                    self.root.after(100, lambda: self.set_status(
+                        "Wyniki lotto zaktualizowane pomyślnie", "success"))
                     self.root.after(300, self._generate_stats_in_background)
                 else:
-                    error_msg = result.stderr[:300] if result.stderr else "Nieznany błąd"
-                    print(f"✗ Błąd aktualizacji: {error_msg}")
+                    error_msg = result.stderr[:200] if result.stderr else "Nieznany błąd"
                     self.root.after(0, self._update_labels)
-                    self.root.after(100, lambda: messagebox.showerror(
-                        "Błąd", f"Nie udało się zaktualizować wyników:\n{error_msg}"))
+                    self.root.after(0, lambda e=error_msg: self.set_status(
+                        f"Błąd aktualizacji: {e}", "error", auto_reset=False))
+                    self.root.after(100, lambda e=error_msg: messagebox.showerror(
+                        "Błąd", f"Nie udało się zaktualizować wyników:\n{e}"))
             except subprocess.TimeoutExpired:
-                print("✗ Timeout")
                 self.root.after(0, self._update_labels)
-                self.root.after(100, lambda: messagebox.showerror("Timeout", "Aktualizacja trwała zbyt długo"))
+                self.root.after(0, lambda: self.set_status(
+                    "Timeout — aktualizacja trwała zbyt długo", "error", auto_reset=False))
+                self.root.after(100, lambda: messagebox.showerror(
+                    "Timeout", "Aktualizacja trwała zbyt długo"))
             except Exception as e:
-                print(f"✗ Błąd: {e}")
                 self.root.after(0, self._update_labels)
-                self.root.after(100, lambda: messagebox.showerror("Błąd", f"Błąd aktualizacji: {str(e)}"))
+                self.root.after(0, lambda ex=e: self.set_status(
+                    f"Błąd aktualizacji: {ex}", "error", auto_reset=False))
+                self.root.after(100, lambda ex=e: messagebox.showerror(
+                    "Błąd", f"Błąd aktualizacji: {ex}"))
 
         threading.Thread(target=run, daemon=True).start()
 
     def _reload_history_main_thread(self):
-        """Zamknij i ponownie otwórz połączenie SQLite w głównym wątku (unika błędu threading)."""
+        """Zamknij i ponownie otwórz połączenie SQLite w głównym wątku."""
         self._load_history()
         self._update_labels()
 
     def _show_database(self):
         """Wyświetl zawartość bazy danych w tabelce."""
         if not self.history_db:
+            self.set_status("Baza danych nie jest załadowana", "warning")
             messagebox.showwarning("Baza danych", "Baza danych nie jest załadowana")
             return
 
@@ -453,8 +519,11 @@ class LottoApp:
             cursor.execute("SELECT id, draw_date, numbers FROM draws ORDER BY id DESC LIMIT 100")
             rows = cursor.fetchall()
         except Exception as e:
+            self.set_status(f"Błąd odczytu bazy: {e}", "error")
             messagebox.showerror("Błąd", f"Nie mogę odczytać bazy: {e}")
             return
+
+        self.set_status(f"Otwarto widok bazy ({len(rows)} rekordów)", "info")
 
         db_win = Toplevel(self.root)
         db_win.title("Baza danych - Wyniki Lotto")
@@ -534,26 +603,25 @@ class LottoApp:
                             numbers_str = "ERROR"
                         f.write(f"{draw_id},{date},{numbers_str}\n")
 
+                self.set_status(f"Dane wyeksportowane: {path}", "success")
                 messagebox.showinfo("Sukces", f"Dane wyeksportowane do:\n{path}")
             except Exception as e:
+                self.set_status(f"Błąd eksportu: {e}", "error")
                 messagebox.showerror("Błąd", f"Nie mogę eksportować: {e}")
 
         Button(export_frame, text="Eksportuj do CSV", command=export_to_csv,
               bg="#334155", fg="white", font=("Arial", 10)).pack()
 
     def _auto_load(self):
-        # Załaduj historię jeśli istnieje
         if DEFAULT_HISTORY_DB.exists():
             self.history_path = DEFAULT_HISTORY_DB
             self._load_history()
 
-        # Załaduj najnowsze statystyki z analysis/; jeśli brak — generuj
         latest = find_latest_stats()
         if latest:
-            print(f"Auto-load statystyk: {latest.name}")
             self._load_stats(latest)
         else:
-            print("Statystyki nie znalezione w analysis/, generuję...")
+            self.set_status("Statystyki nie znalezione — generuję...", "warning", auto_reset=False)
             self._generate_stats_in_background()
 
         self._update_labels()
@@ -565,10 +633,12 @@ class LottoApp:
             self.stats_path = Path(path)
             self.freq_map = {k: v["procent"] for k, v in self.stats.frequency.items()}
             self.status_map = {i: self.stats.status_short(i) for i in range(1, 50)}
+            self.set_status(f"Załadowano statystyki: {Path(path).name}", "success")
         except Exception as exc:
             self.stats = None
             self.freq_map = {i: 0.0 for i in range(1, 50)}
             self.status_map = {i: "" for i in range(1, 50)}
+            self.set_status(f"Błąd statystyk: {exc}", "error", auto_reset=False)
             messagebox.showerror("Błąd statystyk", str(exc))
         self._update_labels()
 
@@ -584,17 +654,16 @@ class LottoApp:
         if not self.history_path or not self.history_path.exists():
             return
         try:
-            # check_same_thread=False pozwala czytać z wątku tkinter (same wątki odczytu są bezpieczne)
             self.history_db = sqlite3.connect(
                 str(self.history_path), check_same_thread=False
             )
             cursor = self.history_db.cursor()
             cursor.execute("SELECT COUNT(*) FROM draws")
             count = cursor.fetchone()[0]
-            print(f"Historia: {count} wylosowań w bazie")
+            self.set_status(f"Historia załadowana: {count} losowań", "success")
         except Exception as e:
-            print(f"Błąd bazy: {e}")
             self.history_db = None
+            self.set_status(f"Błąd bazy historii: {e}", "error", auto_reset=False)
 
     def _pick_stats(self):
         start = str(self.stats_path.parent if self.stats_path else ROOT_DIR)
@@ -654,7 +723,7 @@ class LottoApp:
         self.stat_cards["Suma roznic"].config(text=str(s["suma_roznic"]))
         self.stat_cards["P/N"].config(text=f"{s['parzyste']}P-{s['nieparzyste']}N")
         self.stat_cards["L/H"].config(text=f"{s['niskie']}L-{s['wysokie']}H")
-        self.stat_cards["Historia"].config(text="BYŁA" if self._combination_exists(numbers) else "NOWA")
+        self.stat_cards["Historia"].config(text="BY\u0141A" if self._combination_exists(numbers) else "NOWA")
 
         for card_key in ["Suma", "Spread"]:
             if card_key == "Suma":
@@ -664,7 +733,7 @@ class LottoApp:
 
         self.diff_text.config(state=NORMAL)
         self.diff_text.delete("1.0", END)
-        self.diff_text.insert(END, "Różnice: " + " - ".join(str(d) for d in s["diffs"]))
+        self.diff_text.insert(END, "R\u00f3\u017cnice: " + " - ".join(str(d) for d in s["diffs"]))
         self.diff_text.config(state=DISABLED)
 
         self._show_number(numbers[0])
@@ -694,15 +763,18 @@ class LottoApp:
             draws.reverse()
             return draws
         except Exception as e:
-            print(f"Błąd pobierania historii: {e}")
+            self.set_status(f"Błąd pobierania historii: {e}", "error")
             return []
 
     def _show_history(self):
         draws = self._get_history_draws(50)
 
         if not draws:
+            self.set_status("Brak danych historycznych w bazie", "warning")
             messagebox.showinfo("Historia", "Brak danych historycznych w bazie")
             return
+
+        self.set_status(f"Otwarto historię ({len(draws)} losowań)", "info")
 
         hist_win = Toplevel(self.root)
         hist_win.title("Historia wylosowań")
@@ -737,7 +809,7 @@ class LottoApp:
         self.lbl_num.config(text=str(n))
 
         if not self.stats:
-            details = "Brak wczytanych statystyk.\nUżyj przycisku 'Wczytaj statystyki'."
+            details = "Brak wczytanych statystyk.\nU\u017cyj przycisku 'Wczytaj statystyki'."
         else:
             d = self.stats.number_stats(n)
             streak_txt = "brak danych"
@@ -750,8 +822,8 @@ class LottoApp:
 
             details = (
                 f"Status:      {d['status']}\n"
-                f"Wystąpienia: {d['wystapienia']}\n"
-                f"Udział:      {d['procent']:.2f} %\n"
+                f"Wyst\u0105pienia: {d['wystapienia']}\n"
+                f"Udzia\u0142:      {d['procent']:.2f} %\n"
                 f"Rolling100:  {roll_txt}\n"
                 f"Cold streak: {streak_txt}\n\n"
             )
