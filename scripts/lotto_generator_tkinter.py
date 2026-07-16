@@ -14,27 +14,33 @@ APP_TITLE = "Generator Lotto - Tkinter"
 
 
 def get_root_dir() -> Path:
-    """Zwraca ROOT_DIR zarówno dla .py jak i .exe (PyInstaller)."""
+    """Zwraca ROOT_DIR zarówno dla .py jak i .exe (PyInstaller).
+    Jeśli .exe znajduje się w dist/, cofa się do katalogu nadrzędnego.
+    """
     if getattr(sys, 'frozen', False):
-        return Path(sys.executable).parent
+        exe_dir = Path(sys.executable).parent
+        # PyInstaller domyślnie buduje do dist/ — sprawdź czy scripts/ jest obok lub poziom wyżej
+        if (exe_dir / "scripts").exists():
+            return exe_dir
+        parent = exe_dir.parent
+        if (parent / "scripts").exists():
+            return parent
+        # Ostatnia deska ratunku — katalog exe
+        return exe_dir
     return Path(__file__).resolve().parents[1]
 
 
 def get_python_executable() -> str:
     """Zwraca ścieżkę do python.exe — działa i dla .py i dla .exe (PyInstaller)."""
     if getattr(sys, 'frozen', False):
-        exe_dir = Path(sys.executable).parent
-        for candidate in [
-            exe_dir / "python.exe",
-            exe_dir / "_internal" / "python.exe",
-        ]:
-            if candidate.exists():
-                return str(candidate)
         import shutil
         py = shutil.which("python") or shutil.which("python3")
         if py:
             return py
-        raise RuntimeError("Nie znaleziono python.exe obok aplikacji!")
+        raise RuntimeError(
+            "Nie znaleziono python.exe w PATH!\n"
+            "Zainstaluj Python i upewnij się, że jest w PATH."
+        )
     return sys.executable
 
 
@@ -487,6 +493,11 @@ class LottoApp:
                 if not script_path.exists():
                     script_path = ROOT_DIR / "scripts" / "generate_lotto_stats.py"
 
+                if not script_path.exists():
+                    self.root.after(0, lambda: self.set_status(
+                        f"Brak skryptu statystyk: {script_path}", "error", auto_reset=False))
+                    return
+
                 result = subprocess.run(
                     [get_python_executable(), str(script_path)],
                     capture_output=True,
@@ -525,6 +536,11 @@ class LottoApp:
                 script_path = ROOT_DIR / "scripts" / "scraper_megalotto.py"
                 if not script_path.exists():
                     script_path = ROOT_DIR / "scripts" / "update_lotto_results.py"
+
+                if not script_path.exists():
+                    self.root.after(0, lambda: self.set_status(
+                        f"Brak skryptu aktualizacji: {script_path}", "error", auto_reset=False))
+                    return
 
                 result = subprocess.run(
                     [get_python_executable(), str(script_path), "--update-xlsx"],
@@ -606,6 +622,7 @@ class LottoApp:
         tree.heading("Data", text="Data")
         tree.heading("Liczby", text="Liczby")
         tree.column("#0", width=40)
+        tree.column("ID", width=60)
         tree.column("ID", width=60)
         tree.column("Data", width=150)
         tree.column("Liczby", width=600)
