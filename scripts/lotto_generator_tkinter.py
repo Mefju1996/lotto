@@ -78,6 +78,31 @@ def draw_stats(numbers):
     }
 
 
+def _clamp(v, lo=0, hi=255):
+    return max(lo, min(hi, int(v)))
+
+
+def _hex_to_rgb(hex_color: str):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb):
+    r, g, b = (_clamp(x) for x in rgb)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _mix_colors(c1: str, c2: str, t: float):
+    t = max(0.0, min(1.0, float(t)))
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    return _rgb_to_hex((
+        r1 + (r2 - r1) * t,
+        g1 + (g2 - g1) * t,
+        b1 + (b2 - b1) * t,
+    ))
+
+
 class LottoStatistics:
     REQUIRED = {"freq": ["1_Czestotliwosc"], "hot": ["2_Hot_Numbers"], "cold": ["3_Cold_Numbers"]}
     OPTIONAL = {
@@ -227,27 +252,6 @@ class LottoStatistics:
             "streak": streak,
         }
 
-def _clamp(v, lo=0, hi=255):
-    return max(lo, min(hi, int(v)))
-
-def _hex_to_rgb(hex_color: str):
-    hex_color = hex_color.lstrip("#")
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-def _rgb_to_hex(rgb):
-    r, g, b = (_clamp(x) for x in rgb)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-def _mix_colors(c1: str, c2: str, t: float):
-    t = max(0.0, min(1.0, t))
-    r1, g1, b1 = _hex_to_rgb(c1)
-    r2, g2, b2 = _hex_to_rgb(c2)
-    return _rgb_to_hex((
-        r1 + (r2 - r1) * t,
-        g1 + (g2 - g1) * t,
-        b1 + (b2 - b1) * t,
-    ))
-
 class LottoApp:
     def __init__(self, root):
         self.root = root
@@ -273,29 +277,31 @@ class LottoApp:
     # ------------------------------------------------------------------
     # STATUS BAR
     # ------------------------------------------------------------------
-    def _number_color_from_cold_streak(self, n):
-        cold = "#ef4444"   # świeża / mocna czerwień
-        warm = "#f59e0b"   # pośredni pomarańcz
-        blue = "#2563eb"   # długi brak -> niebieski
+    def _number_color_from_cold_streak(self, n: int) -> str:
+        neutral = "#475569"
+        red = "#ef4444"
+        orange = "#f59e0b"
+        blue = "#2563eb"
 
-        streak = None
-        if self.stats:
-            d = self.stats.number_stats(n)
-            if d and d.get("streak"):
-                streak = d["streak"].get("losowan_temu")
+        if not self.stats:
+            return neutral
 
-        if streak is None:
-            return "#475569"  # neutralny, gdy brak danych
+        try:
+            data = self.stats.number_stats(n)
+            streak = data.get("streak") or {}
+            missing = streak.get("losowan_temu")
+            if missing is None:
+                return neutral
 
-        # Skala: 0-10 losowań -> ciepłe tony, 10-40 -> przejście do blue
-        if streak <= 10:
-            t = streak / 10
-            return _mix_colors(cold, warm, t)
-        elif streak <= 40:
-            t = (streak - 10) / 30
-            return _mix_colors(warm, blue, t)
-        else:
+            missing = int(missing)
+
+            if missing <= 5:
+                return _mix_colors(red, orange, missing / 5)
+            if missing <= 25:
+                return _mix_colors(orange, blue, (missing - 5) / 20)
             return blue
+        except Exception:
+            return neutral
 
     def set_status(self, msg: str, level: str = "info", auto_reset: bool = True) -> None:
         """
@@ -736,12 +742,16 @@ class LottoApp:
         numbers = generate_numbers()
         self.current_numbers = numbers
         s = draw_stats(numbers)
-        hot = self.stats.hot_rank if self.stats else {}
-        cold = self.stats.cold_rank if self.stats else {}
 
         for btn, n in zip(self.ball_labels, numbers):
-            color = "#ef4444" if n in hot else ("#475569" if n in cold else "#2563eb")
-            btn.config(text=str(n), bg=color)
+            color = self._number_color_from_cold_streak(n)
+            btn.config(
+                text=str(n),
+                bg=color,
+                activebackground=color,
+                fg="white",
+                activeforeground="white",
+            )
 
         self.stat_cards["Suma"].config(text=str(s["suma"]))
         self.stat_cards["Spread"].config(text=str(s["spread"]))
