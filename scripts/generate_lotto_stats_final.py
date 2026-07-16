@@ -449,7 +449,6 @@ print("   ✓ Wygenerowano wykres_cold_streaks.png")
 
 # ============================================================
 # ZAKŁADKA 14: NAJCZĘSTSZE TRÓJKI LICZB
-# FIX #3: Zmieniono etykietę print z "\n14." na "\n12b." (kolizja z cold_streaks)
 # ============================================================
 print("\n12b. Generowanie statystyk trójek liczb...")
 trojki = []
@@ -546,8 +545,6 @@ print("   ✓ Wygenerowano wykres_rolling.png")
 
 # ============================================================
 # ZAKŁADKA 17: HEATMAPA WG ROKU
-# FIX #4: Używamy rzeczywistej kolumny 'data' ze scrappera jeśli dostępna,
-#         fallback na daty syntetyczne (co 2 dni) jeśli brak.
 # ============================================================
 print("\n17. Generowanie heatmapy wg roku...")
 
@@ -587,6 +584,7 @@ print("   ✓ Wygenerowano wykres_heatmapa_rok.png")
 
 # ============================================================
 # ZAKŁADKA 18: STATYSTYKI POZYCYJNE
+# FIX: użyj tick_labels= zamiast labels= (matplotlib 3.9+)
 # ============================================================
 print("\n18. Generowanie statystyk pozycyjnych...")
 pozycje_stats = pd.DataFrame({
@@ -624,10 +622,19 @@ for i, v in enumerate(srednie_pozycji.values):
     ax1.text(i+1, v + 0.3, f'{v:.1f}', ha='center', fontsize=10)
 ax1.grid(axis='y', alpha=0.3)
 
-ax2.boxplot([df[col].values for col in liczby_cols],
-            labels=[f'P{i+1}' for i in range(6)],
-            patch_artist=True,
-            boxprops=dict(facecolor='lightblue', alpha=0.7))
+# Kompatybilność matplotlib: tick_labels= (>=3.9) lub labels= (<3.9)
+import matplotlib
+_mpl_ver = tuple(int(x) for x in matplotlib.__version__.split('.')[:2])
+_boxplot_kwargs = dict(
+    patch_artist=True,
+    boxprops=dict(facecolor='lightblue', alpha=0.7)
+)
+if _mpl_ver >= (3, 9):
+    _boxplot_kwargs['tick_labels'] = [f'P{i+1}' for i in range(6)]
+else:
+    _boxplot_kwargs['labels'] = [f'P{i+1}' for i in range(6)]
+
+ax2.boxplot([df[col].values for col in liczby_cols], **_boxplot_kwargs)
 ax2.set_xlabel('Pozycja', fontsize=11)
 ax2.set_ylabel('Wartość liczby', fontsize=11)
 ax2.set_title('Rozkład wartości na każdej pozycji (boxplot)', fontsize=11, fontweight='bold')
@@ -819,7 +826,6 @@ for num in range(1, 50):
         'Aktualny_gap': aktualny_gap
     })
 
-    # FIX #5: usunięto zduplikowany blok gap_detail.append (był dwa razy)
     for g in gaps[:200]:
         gap_detail.append({'Liczba': num, 'Gap': g})
 
@@ -929,7 +935,6 @@ print("   ✓ Wygenerowano wykres_antytrojki_rozklad.png")
 
 # ============================================================
 # ZAPISANIE DO PLIKU XLSX
-# FIX #6: Poprawiono numer kroku z '22.' na '24.'
 # ============================================================
 print("\n24. Zapisywanie danych do pliku Excel...")
 output_file = out('statystyki_lotto.xlsx')
