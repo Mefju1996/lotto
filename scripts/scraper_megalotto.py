@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Scraper wyników Lotto z https://megalotto.pl/wyniki/lotto
+Fallback: lotto.pl (oficjalna strona) gdy megalotto zmieni strukturę HTML.
+
 Zsynchronizowany z:
   - lotto_generator_tkinter.py  → data/lotto_history.db  (tabela draws)
   - generate_lotto_stats_final.py → data/wyniki_lotto.xlsx / Arkusz1
@@ -17,6 +19,7 @@ Wymagania:
 
 import argparse
 import json
+import logging
 import sqlite3
 import time
 from datetime import datetime
@@ -27,13 +30,23 @@ import requests
 from bs4 import BeautifulSoup
 
 # ============================================================
+# LOGGING
+# ============================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+# ============================================================
 # ŚCIEŻKI
 # ============================================================
 ROOT_DIR  = Path(__file__).resolve().parents[1]
 DATA_DIR  = ROOT_DIR / "data"
 RAW_DIR   = DATA_DIR / "raw" / "lotto"
 XLSX_FILE = DATA_DIR / "wyniki_lotto.xlsx"
-DB_FILE   = DATA_DIR / "lotto_history.db"   # używane przez lotto_generator_tkinter.py
+DB_FILE   = DATA_DIR / "lotto_history.db"
 SHEET     = "Arkusz1"
 
 # Kolumny wymagane przez generate_lotto_stats_final.py
@@ -45,9 +58,10 @@ DELAY_SEC = 1.5
 
 
 # ============================================================
-# PARSOWANIE STRONY
+# PARSOWANIE — MEGALOTTO (pierwotna metoda)
 # ============================================================
-def _parse_page(html: str) -> list[dict]:
+def _parse_megalotto(html: str, year: int) -> list[dict]:
+    """Parsuje HTML z megalotto.pl. Zwraca listę słowników (może być pusta)."""
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
@@ -55,7 +69,24 @@ def _parse_page(html: str) -> list[dict]:
     date_tags = soup.find_all("li", class_="date_in_list")
     num_tags  = soup.find_all("li", class_="numbers_in_list")
 
+    logger.debug(
+        "Megalotto – tagi: nr=%d, date=%d, num=%d",
+        len(nr_tags), len(date_tags), len(num_tags),
+    )
+
+    if not nr_tags or not date_tags or not num_tags:
+        logger.warning(
+            "Megalotto: nie znaleziono tagów dla roku %d "
+            "(nr=%d, date=%d, num=%d) – być może zmieniono strukturę HTML.",
+            year, len(nr_tags), len(date_tags), len(num_tags),
+        )
+        return results
+
     if len(num_tags) % 6 != 0:
+        logger.warning(
+            "Megalotto: liczba tagów liczbowych (%d) nie jest wielokrotnością 6 dla roku %d.",
+            len(num_tags), year,
+        )
         return results
 
     n_draws = min(len(nr_tags), len(date_tags), len(num_tags) // 6)
@@ -98,21 +129,114 @@ def _parse_page(html: str) -> list[dict]:
 
 
 # ============================================================
-# SCRAPING JEDNEGO ROKU
+# PARSOWANIE — LOTTO.PL (fallback)
+# ============================================================
+def _parse_lotto_pl(html: str, year: int) -> list[dict]:
+    """
+    Fallback: parsuje HTML z lotto.pl/wyniki-i-wygrane/lotto.
+    Strona używa innej struktury (tabela lub data-atrybuty).
+    Zwraca listę słowników lub [] gdy struktura nieznana.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+
+    # lotto.pl: wiersze tabeli z wynikami
+    rows = soup.select("table.results-table tr[data-draw-date]")
+    if not rows:
+        # Alternatywna struktura: divs z klasą draw-result
+        rows = soup.select("div.draw-result")
+
+    if not rows:
+        logger.warning("Lotto.pl fallback: nie rozpoznano struktury HTML dla roku %d.", year)
+        return results
+
+    for row in rows:
+        try:
+            raw_date = row.get("data-draw-date") or row.select_one(".draw-date").get_text(strip=True)
+            draw_date = None
+            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
+                try:
+                    draw_date = datetime.strptime(raw_date, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if not draw_date:
+                continue
+
+            num_els = row.select(".ball, .number, td.draw-number")
+            numbers = [int(el.get_text(strip=True)) for el in num_els if el.get_text(strip=True).isdigit()]
+            if len(numbers) < 6:
+                continue
+            numbers = numbers[:6]
+
+            nr_el = row.select_one(".draw-id, td.draw-number-id")
+            nr_losowania = int(nr_el.get_text(strip=True)) if nr_el else 0
+
+            results.append({
+                "data":         draw_date,
+                "nr_losowania": nr_losowania,
+                "pierwsza":     numbers[0],
+                "druga":        numbers[1],
+                "trzecia":      numbers[2],
+                "czwarta":      numbers[3],
+                "piąta":        numbers[4],
+                "szósta":       numbers[5],
+            })
+        except Exception as exc:
+            logger.debug("Lotto.pl: pominięto wiersz (%s)", exc)
+            continue
+
+    return results
+
+
+# ============================================================
+# SCRAPING JEDNEGO ROKU (z fallbackiem)
 # ============================================================
 def scrape_year(year: int) -> list[dict]:
-    url = f"{BASE_URL}?year={year}"
-    print(f"  → GET {url}")
+    """
+    Pobiera wyniki dla danego roku.
+    Kolejność prób:
+      1. megalotto.pl  (pierwotna)
+      2. lotto.pl      (fallback gdy megalotto zwróci 0 rekordów)
+    """
+    # --- Próba 1: megalotto.pl ---
+    url_megalotto = f"{BASE_URL}?year={year}"
+    logger.info("→ GET %s", url_megalotto)
+    records: list[dict] = []
+
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=20)
+        resp = requests.get(url_megalotto, headers=HEADERS, timeout=20)
         resp.raise_for_status()
+        records = _parse_megalotto(resp.text, year)
+        logger.info("Megalotto: sparsowano %d losowań z roku %d", len(records), year)
     except requests.RequestException as exc:
-        print(f"  ✗ Błąd pobierania {url}: {exc}")
-        return []
+        logger.error("Błąd pobierania megalotto (%s): %s", url_megalotto, exc)
 
     time.sleep(DELAY_SEC)
-    records = _parse_page(resp.text)
-    print(f"     Sparsowano {len(records)} losowań z roku {year}")
+
+    if records:
+        return records
+
+    # --- Próba 2: lotto.pl (fallback) ---
+    url_lotto = f"https://www.lotto.pl/wyniki-i-wygrane/lotto?date={year}"
+    logger.warning("Megalotto zwróciło 0 rekordów — próba fallbacku: %s", url_lotto)
+    try:
+        resp2 = requests.get(url_lotto, headers=HEADERS, timeout=20)
+        resp2.raise_for_status()
+        records = _parse_lotto_pl(resp2.text, year)
+        logger.info("Lotto.pl fallback: sparsowano %d losowań z roku %d", len(records), year)
+    except requests.RequestException as exc:
+        logger.error("Błąd pobierania lotto.pl (%s): %s", url_lotto, exc)
+
+    time.sleep(DELAY_SEC)
+
+    if not records:
+        logger.error(
+            "Brak wyników dla roku %d — obie źródła zawiodły. "
+            "Sprawdź połączenie sieciowe lub strukturę HTML źródłowych stron.",
+            year,
+        )
+
     return records
 
 
@@ -127,19 +251,13 @@ def save_raw_txt(records: list[dict], year: int) -> None:
         nums = " ".join(str(r[c]) for c in ["pierwsza", "druga", "trzecia", "czwarta", "piąta", "szósta"])
         lines.append(f"{r['nr_losowania']}\t{r['data']}\t{nums}")
     out_file.write_text("\n".join(lines), encoding="utf-8")
-    print(f"  ✓ Zapisano raw: {out_file}")
+    logger.info("Zapisano raw: %s", out_file)
 
 
 # ============================================================
-# AKTUALIZACJA SQLITE — wymagana przez lotto_generator_tkinter.py
-# Schemat: draws(id INTEGER PK, draw_date TEXT, numbers TEXT JSON)
+# AKTUALIZACJA SQLITE
 # ============================================================
 def update_db(records: list[dict]) -> int:
-    """
-    Wstawia nowe rekordy do lotto_history.db.
-    Klucz deduplikacji: draw_date (jeden losowanie = jedna data).
-    Zwraca liczbę nowo wstawionych wierszy.
-    """
     if not records:
         return 0
 
@@ -147,7 +265,6 @@ def update_db(records: list[dict]) -> int:
     con = sqlite3.connect(str(DB_FILE))
     cur = con.cursor()
 
-    # Utwórz tabelę jeśli nie istnieje (zgodnie ze schematem w tkinter)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS draws (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,7 +276,7 @@ def update_db(records: list[dict]) -> int:
 
     inserted = 0
     for r in records:
-        draw_date_str = str(r["data"])          # 'YYYY-MM-DD'
+        draw_date_str = str(r["data"])
         numbers = sorted([
             r["pierwsza"], r["druga"], r["trzecia"],
             r["czwarta"],  r["piąta"], r["szósta"]
@@ -174,25 +291,20 @@ def update_db(records: list[dict]) -> int:
             if cur.rowcount:
                 inserted += 1
         except sqlite3.Error as exc:
-            print(f"  ⚠ DB błąd dla {draw_date_str}: {exc}")
+            logger.warning("DB błąd dla %s: %s", draw_date_str, exc)
 
     con.commit()
     con.close()
-    print(f"  ✓ Baza {DB_FILE.name}: +{inserted} nowych rekordów")
+    logger.info("Baza %s: +%d nowych rekordów", DB_FILE.name, inserted)
     return inserted
 
 
 # ============================================================
-# AKTUALIZACJA XLSX — wymagana przez generate_lotto_stats_final.py
+# AKTUALIZACJA XLSX
 # ============================================================
 def update_xlsx(records: list[dict]) -> None:
-    """
-    Aktualizuje Arkusz1 w wyniki_lotto.xlsx.
-    Kolumny: data | nr_losowania | pierwsza | druga | trzecia | czwarta | piąta | szósta
-    Sortowanie: malejące wg daty (df.head(50) = ostatnie 50 losowań).
-    """
     if not records:
-        print("  ℹ Brak rekordów do zapisania w XLSX.")
+        logger.info("Brak rekordów do zapisania w XLSX.")
         return
 
     new_df = pd.DataFrame(records, columns=COLUMNS)
@@ -206,7 +318,7 @@ def update_xlsx(records: list[dict]) -> None:
                     existing_df["data"], errors="coerce"
                 ).dt.date
         except Exception as exc:
-            print(f"  ⚠ Nie mogę wczytać istniejącego XLSX ({exc}), tworzę nowy.")
+            logger.warning("Nie mogę wczytać istniejącego XLSX (%s), tworzę nowy.", exc)
             existing_df = pd.DataFrame(columns=COLUMNS)
     else:
         existing_df = pd.DataFrame(columns=COLUMNS)
@@ -230,14 +342,14 @@ def update_xlsx(records: list[dict]) -> None:
         with pd.ExcelWriter(XLSX_FILE, engine="openpyxl") as writer:
             combined.to_excel(writer, sheet_name=SHEET, index=False)
 
-    print(f"  ✓ XLSX zaktualizowany: {XLSX_FILE}")
-    print(f"     Łącznie rekordów w '{SHEET}': {len(combined)}")
+    logger.info("XLSX zaktualizowany: %s", XLSX_FILE)
+    logger.info("Łącznie rekordów w '%s': %d", SHEET, len(combined))
     if not combined.empty:
         row0 = combined.iloc[0]
-        print(
-            f"     Najnowsze: {row0['data']}  "
-            f"nr {row0['nr_losowania']}: "
-            f"{row0[['pierwsza','druga','trzecia','czwarta','piąta','szósta']].tolist()}"
+        logger.info(
+            "Najnowsze: %s  nr %s: %s",
+            row0["data"], row0["nr_losowania"],
+            row0[["pierwsza", "druga", "trzecia", "czwarta", "piąta", "szósta"]].tolist(),
         )
 
 
@@ -246,7 +358,7 @@ def update_xlsx(records: list[dict]) -> None:
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="Scraper wyników Lotto z megalotto.pl"
+        description="Scraper wyników Lotto z megalotto.pl (fallback: lotto.pl)"
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--year",      type=int,
@@ -257,7 +369,12 @@ def main():
                         help="Zaktualizuj data/wyniki_lotto.xlsx")
     parser.add_argument("--no-db", action="store_true",
                         help="Pomiń zapis do lotto_history.db")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Pokaż szczegółowe logi debugowania")
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     current_year = datetime.now().year
 
@@ -270,33 +387,31 @@ def main():
 
     all_records: list[dict] = []
 
-    print("=" * 60)
-    print("SCRAPER MEGALOTTO.PL — START")
-    print("=" * 60)
+    logger.info("=" * 50)
+    logger.info("SCRAPER MEGALOTTO.PL — START (fallback: lotto.pl)")
+    logger.info("=" * 50)
 
     for year in years:
-        print(f"\nRok {year}:")
+        logger.info("Rok %d:", year)
         records = scrape_year(year)
         if records:
             save_raw_txt(records, year)
             all_records.extend(records)
 
-    print(f"\nŁącznie pobrano: {len(all_records)} losowań")
+    logger.info("Łącznie pobrano: %d losowań", len(all_records))
 
     if all_records:
-        # Zawsze aktualizuj DB (używaną przez Tkinter)
         if not args.no_db:
-            print("\nAktualizacja SQLite (lotto_history.db)...")
             update_db(all_records)
-
-        # Opcjonalnie aktualizuj XLSX (dla statystyk)
         if args.update_xlsx:
-            print("\nAktualizacja XLSX (wyniki_lotto.xlsx)...")
             update_xlsx(all_records)
+    else:
+        logger.error(
+            "Nie pobrano żadnych danych. "
+            "Sprawdź połączenie sieciowe lub strukturę HTML źródłowych stron."
+        )
 
-    print("\n✅ Gotowe!")
-    if all_records and not args.update_xlsx:
-        print("   Podpowiedź: dodaj --update-xlsx żeby zaktualizować wyniki_lotto.xlsx")
+    logger.info("KONIEC")
 
 
 if __name__ == "__main__":
