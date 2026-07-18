@@ -82,14 +82,14 @@ DEFAULT_HISTORY_SHEET = "Arkusz1"
 DEFAULT_HISTORY_DB = DATA_DIR / "lotto_history.db"
 
 _STATUS_COLORS = {
-    "info":    "#e5e7eb",
+    "info": "#e5e7eb",
     "success": "#4ade80",
     "warning": "#fbbf24",
-    "error":   "#ef4444",
+    "error": "#ef4444",
 }
 
 
-def find_latest_stats() -> Path | None:
+def find_latest_stats():
     """Zwraca najnowszy plik statystyk z folderu analysis/ (wedlug mtime)."""
     if not ANALYSIS_DIR.exists():
         return None
@@ -169,10 +169,10 @@ def _mix_colors(c1: str, c2: str, t: float):
 class LottoStatistics:
     REQUIRED = {"freq": ["1_Czestotliwosc"], "hot": ["2_Hot_Numbers"], "cold": ["3_Cold_Numbers"]}
     OPTIONAL = {
-        "pairs":   ["6_TOP50_Par"],
-        "streak":  ["13_Cold_Streaks"],
+        "pairs": ["6_TOP50_Par"],
+        "streak": ["13_Cold_Streaks"],
         "rolling": ["16RollingFreq", "16_RollingFreq", "21_Sliding_Window", "Sliding_Window"],
-        "years":   ["17_Heatmapa_Rok", "17_HeatmapaRok", "Heatmapa_Rok"],
+        "years": ["17_Heatmapa_Rok", "17_HeatmapaRok", "Heatmapa_Rok"],
     }
 
     def __init__(self, xlsx_path):
@@ -376,7 +376,7 @@ class LottoApp:
 
     def set_status(self, msg: str, level: str = "info", auto_reset: bool = True) -> None:
         color = _STATUS_COLORS.get(level, _STATUS_COLORS["info"])
-        self.status_bar.config(text=f"  {msg}", foreground=color)
+        self.status_bar.config(text=f" {msg}", foreground=color)
 
         if self._status_reset_id is not None:
             self.root.after_cancel(self._status_reset_id)
@@ -384,8 +384,7 @@ class LottoApp:
 
         if auto_reset and level in ("info", "success"):
             self._status_reset_id = self.root.after(
-                5000, lambda: self.set_status("Gotowy", "info", auto_reset=False)
-            )
+                5000, lambda: self.set_status("Gotowy", "info", auto_reset=False))
 
     # ------------------------------------------------------------------
     # STATYSTYKI ODSTEPOW MIEDZY WYSTAPIENIAMI LICZBY (historyczne, per liczba)
@@ -516,7 +515,7 @@ class LottoApp:
 
         self.gap_stats_label = Label(
             wrapper,
-            text="Srednia: --   Mediana: --   Dominanta: --   Suma: --",
+            text="Srednia: -- Mediana: -- Dominanta: -- Suma: --",
             bg="#111827",
             fg="#9ca3af",
             font=("Arial", 9),
@@ -560,7 +559,7 @@ class LottoApp:
             self.chart_ax.set_yticks([])
             self.chart_canvas.draw()
             if self.gap_stats_label:
-                self.gap_stats_label.config(text="Srednia: --   Mediana: --   Dominanta: --   Suma: --")
+                self.gap_stats_label.config(text="Srednia: -- Mediana: -- Dominanta: -- Suma: --")
             return
 
         x = np.arange(len(labels))
@@ -612,9 +611,83 @@ class LottoApp:
         if stats and self.gap_stats_label:
             mode_txt = ", ".join(str(x) for x in stats["mode"])
             self.gap_stats_label.config(
-                text=(f"Srednia: {stats['mean']}   Mediana: {stats['median']}   "
-                      f"Dominanta: {mode_txt}   Suma: {stats['sum']}")
-            )
+                text=(f"Srednia: {stats['mean']} Mediana: {stats['median']} "
+                      f"Dominanta: {mode_txt} Suma: {stats['sum']}"))
+
+    # ------------------------------------------------------------------
+    # NOWE OKNO: statystyki "ile losowan temu" dla WSZYSTKICH liczb 1-49
+    # ------------------------------------------------------------------
+    def show_gap_overview(self):
+        if not self.number_gap_stats:
+            self.set_status("Brak danych o odstepach - zaladuj historie", "warning")
+            messagebox.showinfo("Odstepy", "Brak danych historycznych w bazie")
+            return
+
+        win = Toplevel(self.root)
+        win.title("Ile losowan temu - wszystkie liczby 1-49")
+        win.geometry("520x700+20+80")  # lewy gorny rog ekranu
+        win.configure(bg="#0b1220")
+
+        Label(
+            win, text="Ile losowan temu - liczby 1-49",
+            font=("Arial", 12, "bold"), bg="#0b1220", fg="white"
+        ).pack(pady=8)
+
+        frame = Frame(win, bg="#0b1220")
+        frame.pack(fill=BOTH, expand=True, padx=10, pady=5)
+
+        vsb = ttk.Scrollbar(frame, orient=VERTICAL)
+        cols = ("Liczba", "Ile los. temu", "Sr. hist.", "Mediana", "Min", "Max", "Status")
+        tree = ttk.Treeview(
+            frame, columns=cols, show="headings",
+            height=28, yscrollcommand=vsb.set
+        )
+        vsb.config(command=tree.yview)
+
+        widths = {"Liczba": 60, "Ile los. temu": 90, "Sr. hist.": 70,
+                  "Mediana": 70, "Min": 50, "Max": 50, "Status": 100}
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=widths[c], anchor="center")
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview", background="#111827", foreground="white",
+                         fieldbackground="#1f2937", borderwidth=0)
+        style.configure("Treeview.Heading", background="#1f2937", foreground="white")
+
+        rows = []
+        for n in range(1, 50):
+            data = self.number_gap_stats.get(n, {})
+            current = data.get("current_gap")
+            mean = data.get("mean_gap")
+            median = data.get("median_gap")
+            mn = data.get("min_gap")
+            mx = data.get("max_gap")
+            status = self.status_map.get(n, "-")
+            rows.append((n, current, mean, median, mn, mx, status))
+
+        # sortowanie: liczby, ktore nie padaly najdluzej, na gorze
+        rows.sort(key=lambda r: (r[1] if r[1] is not None else -1), reverse=True)
+
+        for n, current, mean, median, mn, mx, status in rows:
+            tree.insert("", END, values=(
+                n,
+                current if current is not None else "-",
+                f"{mean:.2f}" if mean is not None else "-",
+                median if median is not None else "-",
+                mn if mn is not None else "-",
+                mx if mx is not None else "-",
+                status,
+            ))
+
+        tree.pack(fill=BOTH, expand=True, side=LEFT)
+        vsb.pack(fill=Y, side=RIGHT)
+
+        Button(
+            win, text="Zamknij", command=win.destroy,
+            bg="#334155", fg="white"
+        ).pack(pady=8)
 
     def _build_ui(self):
         Label(self.root, text="Generator Lotto - Tkinter",
@@ -634,17 +707,17 @@ class LottoApp:
         ttk.Separator(btn_frame, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=8, pady=4)
 
         self._data_menu = Menu(self.root, tearoff=0, bg="#1f2937", fg="white",
-                               activebackground="#374151", activeforeground="white",
-                               relief=FLAT, bd=0)
+                                activebackground="#374151", activeforeground="white",
+                                relief=FLAT, bd=0)
         self._data_menu.add_command(label="Wczytaj statystyki",
-                                    command=self._pick_stats)
+                                     command=self._pick_stats)
         self._data_menu.add_command(label="Plik historii - zmien",
-                                    command=self._pick_history)
+                                     command=self._pick_history)
         self._data_menu.add_command(label="Historia losowan",
-                                    command=self._show_history)
+                                     command=self._show_history)
         self._data_menu.add_separator()
         self._data_menu.add_command(label="Baza danych",
-                                    command=self._show_database)
+                                     command=self._show_database)
 
         def _open_data_menu():
             btn = self._btn_data
@@ -659,6 +732,12 @@ class LottoApp:
         )
         self._btn_data.pack(side=LEFT, padx=5)
 
+        Button(
+            btn_frame, text="Wszystkie liczby", command=self.show_gap_overview,
+            bg="#7c3aed", fg="white", font=("Arial", 10, "bold"),
+            width=14, relief=RAISED, bd=2
+        ).pack(side=LEFT, padx=5)
+
         content_frame = Frame(self.root, bg="#0b1220")
         content_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
 
@@ -671,7 +750,7 @@ class LottoApp:
         self.ball_labels = []
         for i in range(6):
             lbl = Label(balls_frame, text="--", font=("Arial", 18, "bold"),
-                       bg="#2563eb", fg="white", width=6, relief=RAISED, cursor="hand2")
+                        bg="#2563eb", fg="white", width=6, relief=RAISED, cursor="hand2")
             lbl.pack(side=LEFT, padx=5)
             lbl.bind("<Button-1>", lambda e, idx=i: self._on_ball_clicked(idx))
             self.ball_labels.append(lbl)
@@ -691,9 +770,9 @@ class LottoApp:
         diff_frame = Frame(left_frame, bg="#1f2937", relief=RIDGE, bd=1)
         diff_frame.pack(pady=5, fill=BOTH, expand=True)
         Label(diff_frame, text="Roznice miedzy kolejnymi liczbami",
-             bg="#1f2937", fg="white", font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
+              bg="#1f2937", fg="white", font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
         self.diff_text = Text(diff_frame, height=4, bg="#0b1220", fg="#e5e7eb",
-                             font=("Courier", 9), relief=FLAT, wrap=WORD)
+                               font=("Courier", 9), relief=FLAT, wrap=WORD)
         self.diff_text.pack(fill=BOTH, expand=True, padx=5, pady=5)
         self.diff_text.config(state=DISABLED)
 
@@ -701,14 +780,14 @@ class LottoApp:
         right_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
 
         Label(right_frame, text="Szczegoly liczby", bg="#111827", fg="white",
-             font=("Arial", 14, "bold")).pack(anchor=W, padx=10, pady=5)
+              font=("Arial", 14, "bold")).pack(anchor=W, padx=10, pady=5)
 
         self.lbl_num = Label(right_frame, text="--", bg="#111827", fg="#ffd166",
-                            font=("Arial", 32, "bold"))
+                              font=("Arial", 32, "bold"))
         self.lbl_num.pack(pady=5)
 
         self.details_text = Text(right_frame, height=12, bg="#0b1220", fg="#e5e7eb",
-                                font=("Courier", 10), relief=FLAT, wrap=WORD)
+                                  font=("Courier", 10), relief=FLAT, wrap=WORD)
         self.details_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.details_text.config(state=DISABLED)
 
@@ -717,7 +796,7 @@ class LottoApp:
         ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, side=BOTTOM)
         self.status_bar = ttk.Label(
             self.root,
-            text="  Gotowy",
+            text=" Gotowy",
             relief=FLAT,
             anchor=W,
             font=("Arial", 9),
@@ -730,17 +809,15 @@ class LottoApp:
     def _update_labels(self):
         if self.stats and self.history_db:
             self.set_status(
-                f"Statystyki: {self.stats_path.name}  |  Historia: {self.history_path.name}",
-                "info", auto_reset=False
-            )
+                f"Statystyki: {self.stats_path.name} | Historia: {self.history_path.name}",
+                "info", auto_reset=False)
         elif self.stats:
             self.set_status(
-                f"Statystyki: {self.stats_path.name}  |  Historia: brak",
-                "warning", auto_reset=False
-            )
+                f"Statystyki: {self.stats_path.name} | Historia: brak",
+                "warning", auto_reset=False)
         else:
             self.set_status("Brak statystyk - uzyj menu 'Dane' -> Wczytaj statystyki",
-                            "warning", auto_reset=False)
+                             "warning", auto_reset=False)
 
     def _generate_stats_in_background(self):
         def run():
@@ -851,18 +928,17 @@ class LottoApp:
         db_win.geometry("900x600")
         db_win.configure(bg="#0b1220")
 
-        Label(Frame(db_win, bg="#0b1220").pack(pady=5) or db_win,
+        Label(db_win,
               text=f"Wyswietlono 100 ostatnich losowan (total: {len(rows)})",
-              font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
+              font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack(pady=5)
 
         tree_frame = Frame(db_win, bg="#0b1220")
         tree_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
         vsb = ttk.Scrollbar(tree_frame, orient=VERTICAL)
         hsb = ttk.Scrollbar(tree_frame, orient=HORIZONTAL)
-
         tree = ttk.Treeview(tree_frame, columns=("ID", "Data", "Liczby"), height=25,
-                           yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+                             yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         vsb.config(command=tree.yview)
         hsb.config(command=tree.xview)
 
@@ -872,14 +948,13 @@ class LottoApp:
         tree.heading("Liczby", text="Liczby")
         tree.column("#0", width=40)
         tree.column("ID", width=60)
-        tree.column("ID", width=60)
         tree.column("Data", width=150)
         tree.column("Liczby", width=600)
 
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("Treeview", background="#111827", foreground="white",
-                       fieldbackground="#1f2937", borderwidth=0)
+                         fieldbackground="#1f2937", borderwidth=0)
         style.configure("Treeview.Heading", background="#1f2937", foreground="white")
         style.map("Treeview", background=[("selected", "#374151")])
 
@@ -1078,10 +1153,10 @@ class LottoApp:
         hist_win.configure(bg="#0b1220")
 
         Label(hist_win, text="Ostatnie wylosowania",
-             font=("Arial", 12, "bold"), bg="#0b1220", fg="white").pack(pady=5)
+              font=("Arial", 12, "bold"), bg="#0b1220", fg="white").pack(pady=5)
 
         text = Text(hist_win, bg="#0b1220", fg="#e5e7eb", font=("Courier", 10),
-                   relief=FLAT, wrap=WORD)
+                    relief=FLAT, wrap=WORD)
         text.pack(fill=BOTH, expand=True, padx=10, pady=5)
 
         scrollbar = ttk.Scrollbar(text)
@@ -1089,7 +1164,7 @@ class LottoApp:
         scrollbar.config(command=text.yview)
         scrollbar.pack(side=RIGHT, fill=Y)
 
-        content = "Data                | Liczby\n" + "-" * 50 + "\n"
+        content = "Data | Liczby\n" + "-" * 50 + "\n"
         for date, numbers in draws:
             content += f"{date:20s} | {' '.join(f'{n:2d}' for n in numbers)}\n"
 
@@ -1132,26 +1207,26 @@ class LottoApp:
             current_txt = str(current_streak) if current_streak is not None else "brak danych"
 
             details_lines = [
-                f"Status:      {d['status']}",
+                f"Status: {d['status']}",
                 f"Wystapienia: {d['wystapienia']}",
-                f"Udzial:      {d['procent']:.2f} %",
-                f"Rolling100:  {roll_txt}",
+                f"Udzial: {d['procent']:.2f} %",
+                f"Rolling100: {roll_txt}",
                 f"Cold streak: {streak_txt}",
                 "",
                 "Odstepy miedzy wystapieniami (historia bazy):",
                 f"  Liczba wystapien w historii: {count_txt}",
-                f"  Biezacy odstep:      {current_txt}",
-                f"  Srednia historyczna: {mean_txt}",
-                f"  Mediana historyczna: {median_txt}",
-                f"  Dominanta:           {mode_txt}",
-                f"  Min / Max:           {minmax_txt}",
-                f"  Biezacy vs mediana:  {delta_txt}",
+                f"  Biezacy odstep:               {current_txt}",
+                f"  Srednia historyczna:          {mean_txt}",
+                f"  Mediana historyczna:          {median_txt}",
+                f"  Dominanta:                    {mode_txt}",
+                f"  Min / Max:                    {minmax_txt}",
+                f"  Biezacy vs mediana:           {delta_txt}",
                 "",
             ]
 
             if d["last_years"]:
                 details_lines.append("Ostatnie lata:")
-                details_lines.append("  ".join(f"{y}: {v}" for y, v in d["last_years"]))
+                details_lines.append(" ".join(f"{y}: {v}" for y, v in d["last_years"]))
                 details_lines.append("")
             else:
                 details_lines.append("Brak danych rocznych.")
