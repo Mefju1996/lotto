@@ -509,11 +509,8 @@ print("   ✓ Wygenerowano wykres_antypary.png")
 # ZAKŁADKA 16: CZĘSTOTLIWOŚĆ KROCZĄCA (rolling frequency)
 # ============================================================
 print("\n16. Generowanie częstotliwości kroczącej...")
-# Wybieramy 9 liczb: top 3 hot, top 3 cold, 3 środkowe
-top3_hot = freq_df.nlargest(3, 'Wystąpienia')['Liczba'].tolist()
-top3_cold = freq_df.nsmallest(3, 'Wystąpienia')['Liczba'].tolist()
-srednie = freq_df.sort_values('Wystąpienia').iloc[len(freq_df)//2 - 1 : len(freq_df)//2 + 2]['Liczba'].tolist()
-tracked_numbers = top3_hot + top3_cold + srednie
+# Rolling dla wszystkich liczb 1-49
+tracked_numbers = list(range(1, 50))
 
 window = 100
 rolling_data = {}

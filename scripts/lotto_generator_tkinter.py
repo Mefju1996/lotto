@@ -4,6 +4,7 @@ import sqlite3
 import json
 import statistics
 import itertools
+import re
 from pathlib import Path
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
@@ -171,12 +172,14 @@ class LottoStatistics:
     OPTIONAL = {
         "pairs": ["6_TOP50_Par"],
         "streak": ["13_Cold_Streaks"],
-        "rolling": ["16RollingFreq", "16_RollingFreq", "21_Sliding_Window", "Sliding_Window"],
+        "rolling": ["16RollingFreq", "16_RollingFreq", "16_Rolling_Freq", "16_RollingFreq_wykresy", "16_Rolling_Freq_wykresy"],
         "years": ["17_Heatmapa_Rok", "17_HeatmapaRok", "Heatmapa_Rok"],
     }
 
-    def __init__(self, xlsx_path):
+    def __init__(self, xlsx_path, rolling_xlsx_path=None):
         self.path = Path(xlsx_path)
+        self.rolling_path = Path(rolling_xlsx_path) if rolling_xlsx_path else None
+
         self.frequency = {}
         self.hot_rank = {}
         self.cold_rank = {}
@@ -186,10 +189,14 @@ class LottoStatistics:
         self.cold_streak = {}
         self._load()
 
-    def _read(self, candidates):
+    def _read(self, candidates, force_path=None):
+        """Wczytuje pierwszy znaleziony arkusz z listy.
+        Jeśli force_path jest podane, czyta arkusz z tego pliku (zamiast self.path).
+        """
+        target_path = Path(force_path) if force_path else self.path
         for name in candidates:
             try:
-                return pd.read_excel(self.path, sheet_name=name, engine="openpyxl")
+                return pd.read_excel(target_path, sheet_name=name, engine="openpyxl")
             except Exception:
                 pass
         return None
@@ -199,6 +206,25 @@ class LottoStatistics:
             return pd.ExcelFile(self.path, engine="openpyxl").sheet_names
         except Exception:
             return []
+
+    def _read_by_keywords(self, keywords):
+        """Próbuje znaleźć arkusz w Excelu zawierający którykolwiek z keywordów."""
+        sheets = self._sheet_names()
+        if not sheets:
+            return None
+        lowered = {s: str(s).lower() for s in sheets}
+        # preferuj te, które zawierają więcej dopasowań
+        ranked = sorted(
+            sheets,
+            key=lambda s: sum(1 for k in keywords if k in lowered[s]),
+            reverse=True,
+        )
+        for s in ranked:
+            if any(k in lowered[s] for k in keywords):
+                df = self._read([s])
+                if df is not None:
+                    return df
+        return None
 
     def _load(self):
         freq_df = self._read(self.REQUIRED["freq"])
@@ -250,19 +276,37 @@ class LottoStatistics:
             except Exception:
                 pass
 
-        rolling_df = self._read(self.OPTIONAL["rolling"])
+        # Rolling: jeśli aplikacja znalazła osobny plik z rollingiem, to go używamy
+        rolling_df = None
+        if self.rolling_path:
+            rolling_df = self._read(self.OPTIONAL["rolling"], force_path=self.rolling_path)
+            if rolling_df is None:
+                # fallback: wykryj arkusz rolling po nazwie w rolling_path
+                try:
+                    rolling_df = self._read_by_keywords(["rolling", "roll", "freq", "sliding"])
+                    # powyższe czyta z self.path, więc jeśli force_path działa, robimy dodatkowy fallback po keywordach:
+                    if rolling_df is None:
+                        sheets = pd.ExcelFile(self.rolling_path, engine="openpyxl").sheet_names
+                        hits = [s for s in sheets if any(k in str(s).lower() for k in ("rolling", "roll", "freq"))]
+                        for s in hits:
+                            rolling_df = self._read([s], force_path=self.rolling_path)
+                            if rolling_df is not None:
+                                break
+                except Exception:
+                    rolling_df = None
+        if rolling_df is None:
+            rolling_df = self._read(self.OPTIONAL["rolling"])
+            if rolling_df is None:
+                rolling_df = self._read_by_keywords(["rolling", "roll", "freq", "sliding"])
+
         if rolling_df is not None:
             try:
                 for col in rolling_df.columns:
                     col_s = str(col).strip()
-                    num = None
-                    if col_s.isdigit():
-                        num = int(col_s)
-                    else:
-                        try:
-                            num = int(col_s)
-                        except ValueError:
-                            pass
+
+                    m = re.search(r"(\d+)", col_s)
+                    num = int(m.group(1)) if m else None
+
                     if num is not None and 1 <= num <= 49:
                         series = pd.to_numeric(rolling_df[col], errors="coerce").dropna().tolist()
                         self.rolling[num] = [float(v) for v in series[-120:]]
@@ -1010,9 +1054,45 @@ class LottoApp:
         self._update_labels()
         self._draw()
 
+    def _pick_rolling_xlsx(self, base_dir: Path):
+        """Zwraca ścieżkę do pliku z rollingiem/slidingiem (jeśli istnieje).
+        Priorytet: plik z arkuszem rolling (16_Rolling_Freq / Rolling...),
+        potem fallback: sliding (21_Sliding_Window / Sliding...).
+        """
+        candidates = sorted(
+            list(base_dir.rglob("statystyki_lotto_*.xlsx")) + list(base_dir.rglob("statystyki_lotto.xlsx")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+
+        for p in candidates:
+            try:
+                x = pd.ExcelFile(p, engine="openpyxl")
+                sheets = [str(s) for s in x.sheet_names]
+                sheets_l = [s.lower() for s in sheets]
+
+                has_rolling = (
+                    any(s == "16_rolling_freq".lower() for s in sheets_l)
+                    or any("rolling" in s for s in sheets_l)
+                    or any(re.search(r"\broll\b", s) for s in sheets_l)
+                )
+                has_sliding = any(("sliding" in s) or ("window" in s) for s in sheets_l)
+
+                if has_rolling:
+                    return p
+                if has_sliding:
+                    return p
+            except Exception:
+                continue
+
+        return None
+
     def _load_stats(self, path):
         try:
-            self.stats = LottoStatistics(path)
+            rolling_path = self._pick_rolling_xlsx(
+                Path(path).parent if Path(path).is_absolute() else (ROOT_DIR / "analysis")
+            )
+            self.stats = LottoStatistics(path, rolling_xlsx_path=rolling_path)
             self.stats_path = Path(path)
             self.freq_map = {k: v["procent"] for k, v in self.stats.frequency.items()}
             self.status_map = {i: self.stats.status_short(i) for i in range(1, 50)}

@@ -25,7 +25,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
@@ -58,73 +57,132 @@ DELAY_SEC = 1.5
 
 
 # ============================================================
-# PARSOWANIE — MEGALOTTO (pierwotna metoda)
+# PARSOWANIE — MEGALOTTO (pierwotna metoda + tolerancyjny fallback)
 # ============================================================
 def _parse_megalotto(html: str, year: int) -> list[dict]:
-    """Parsuje HTML z megalotto.pl. Zwraca listę słowników (może być pusta)."""
+    """
+    Parsuje HTML z megalotto.pl.
+
+    Strategia:
+      1) Szybki parser po znanych klasach: nr_in_list / date_in_list / numbers_in_list
+      2) Gdy klasy się nie zgadzają (np. dla roku 2026), próbujemy:
+         - znaleźć tekstowe kandydaty-daty pasujące do roku
+         - w pobliżu każdej daty wyciągnąć 6 liczb (pierwsze 6 tokenów będących cyframi)
+    """
     soup = BeautifulSoup(html, "html.parser")
-    results = []
+    results: list[dict] = []
 
-    nr_tags   = soup.find_all("li", class_="nr_in_list")
+    # --- Metoda 1: klasy li (pierwotna) ---
+    nr_tags = soup.find_all("li", class_="nr_in_list")
     date_tags = soup.find_all("li", class_="date_in_list")
-    num_tags  = soup.find_all("li", class_="numbers_in_list")
+    num_tags = soup.find_all("li", class_="numbers_in_list")
 
-    logger.debug(
-        "Megalotto – tagi: nr=%d, date=%d, num=%d",
-        len(nr_tags), len(date_tags), len(num_tags),
+    logger.info(
+        "Megalotto (year=%d): tag counts nr=%d date=%d num=%d",
+        year, len(nr_tags), len(date_tags), len(num_tags),
     )
 
-    if not nr_tags or not date_tags or not num_tags:
-        logger.warning(
-            "Megalotto: nie znaleziono tagów dla roku %d "
-            "(nr=%d, date=%d, num=%d) – być może zmieniono strukturę HTML.",
-            year, len(nr_tags), len(date_tags), len(num_tags),
-        )
-        return results
-
-    if len(num_tags) % 6 != 0:
-        logger.warning(
-            "Megalotto: liczba tagów liczbowych (%d) nie jest wielokrotnością 6 dla roku %d.",
-            len(num_tags), year,
-        )
-        return results
-
-    n_draws = min(len(nr_tags), len(date_tags), len(num_tags) // 6)
-
-    for i in range(n_draws):
-        try:
-            nr_losowania = int(nr_tags[i].get_text(strip=True))
-        except (ValueError, IndexError):
-            continue
-
-        raw_date = date_tags[i].get_text(strip=True)
-        draw_date = None
-        for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y"):
+    if nr_tags and date_tags and num_tags and (len(num_tags) % 6 == 0):
+        n_draws = min(len(nr_tags), len(date_tags), len(num_tags) // 6)
+        for i in range(n_draws):
             try:
-                draw_date = datetime.strptime(raw_date, fmt).date()
-                break
-            except ValueError:
+                nr_losowania = int(nr_tags[i].get_text(strip=True))
+            except (ValueError, IndexError):
                 continue
 
-        numbers = []
-        for j in range(6):
+            raw_date = date_tags[i].get_text(strip=True)
+            draw_date = None
+            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y"):
+                try:
+                    draw_date = datetime.strptime(raw_date, fmt).date()
+                    break
+                except ValueError:
+                    continue
+
+            numbers = []
+            for j in range(6):
+                try:
+                    numbers.append(int(num_tags[i * 6 + j].get_text(strip=True)))
+                except (ValueError, IndexError):
+                    break
+
+            if len(numbers) == 6 and draw_date:
+                results.append({
+                    "data": draw_date,
+                    "nr_losowania": nr_losowania,
+                    "pierwsza": numbers[0],
+                    "druga": numbers[1],
+                    "trzecia": numbers[2],
+                    "czwarta": numbers[3],
+                    "piąta": numbers[4],
+                    "szósta": numbers[5],
+                })
+
+        if results:
+            return results
+
+    # --- Metoda 2: tolerancyjna ekstrakcja na podstawie dat ---
+    date_formats = ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y")
+    candidates: list[tuple[object, datetime.date]] = []
+
+    for el in soup.find_all(string=True):
+        txt = str(el).strip()
+        if not txt:
+            continue
+        for fmt in date_formats:
             try:
-                numbers.append(int(num_tags[i * 6 + j].get_text(strip=True)))
-            except (ValueError, IndexError):
+                d = datetime.strptime(txt, fmt).date()
+            except ValueError:
+                continue
+            if d.year == year:
+                candidates.append((el, d))
+            break
+
+    logger.info("Megalotto (year=%d): found %d date candidates", year, len(candidates))
+    if not candidates:
+        return results
+
+    seen_dates = set()
+
+    def _extract_numbers_near(node) -> list[int]:
+        container = node.find_parent() if hasattr(node, "find_parent") else None
+        container = container or node
+
+        # Bierzemy w przód w obrębie najbliższego kontenera (ograniczenie ilości)
+        scope = container.find_all_next(string=True, limit=500)
+        nums: list[int] = []
+        for s in scope:
+            t = str(s).strip()
+            if t.isdigit():
+                nums.append(int(t))
+            if len(nums) >= 6:
                 break
+        return nums[:6]
 
-        if len(numbers) == 6 and draw_date:
-            results.append({
-                "data":         draw_date,
-                "nr_losowania": nr_losowania,
-                "pierwsza":     numbers[0],
-                "druga":        numbers[1],
-                "trzecia":      numbers[2],
-                "czwarta":      numbers[3],
-                "piąta":        numbers[4],
-                "szósta":       numbers[5],
-            })
+    for node, draw_date in candidates:
+        if draw_date in seen_dates:
+            continue
+        seen_dates.add(draw_date)
 
+        nums = _extract_numbers_near(node)
+        if len(nums) != 6:
+            continue
+
+        # nr_losowania: nie próbujemy zgadywać (DB i tak unikalizuje po dacie)
+        nr_losowania = 0
+        results.append({
+            "data": draw_date,
+            "nr_losowania": nr_losowania,
+            "pierwsza": nums[0],
+            "druga": nums[1],
+            "trzecia": nums[2],
+            "czwarta": nums[3],
+            "piąta": nums[4],
+            "szósta": nums[5],
+        })
+
+    # sortowanie rosnąco po dacie
+    results.sort(key=lambda r: r["data"])
     return results
 
 
@@ -194,48 +252,31 @@ def _parse_lotto_pl(html: str, year: int) -> list[dict]:
 # ============================================================
 def scrape_year(year: int) -> list[dict]:
     """
-    Pobiera wyniki dla danego roku.
-    Kolejność prób:
-      1. megalotto.pl  (pierwotna)
-      2. lotto.pl      (fallback gdy megalotto zwróci 0 rekordów)
+    Pobiera wyniki dla danego roku z megalotto.pl.
+    Jeśli parser nie zwróci rekordów, zapisywane jest raw HTML do debugowania.
     """
-    # --- Próba 1: megalotto.pl ---
     url_megalotto = f"{BASE_URL}?year={year}"
     logger.info("→ GET %s", url_megalotto)
-    records: list[dict] = []
 
     try:
         resp = requests.get(url_megalotto, headers=HEADERS, timeout=20)
         resp.raise_for_status()
-        records = _parse_megalotto(resp.text, year)
-        logger.info("Megalotto: sparsowano %d losowań z roku %d", len(records), year)
     except requests.RequestException as exc:
         logger.error("Błąd pobierania megalotto (%s): %s", url_megalotto, exc)
+        return []
 
-    time.sleep(DELAY_SEC)
-
-    if records:
-        return records
-
-    # --- Próba 2: lotto.pl (fallback) ---
-    url_lotto = f"https://www.lotto.pl/wyniki-i-wygrane/lotto?date={year}"
-    logger.warning("Megalotto zwróciło 0 rekordów — próba fallbacku: %s", url_lotto)
-    try:
-        resp2 = requests.get(url_lotto, headers=HEADERS, timeout=20)
-        resp2.raise_for_status()
-        records = _parse_lotto_pl(resp2.text, year)
-        logger.info("Lotto.pl fallback: sparsowano %d losowań z roku %d", len(records), year)
-    except requests.RequestException as exc:
-        logger.error("Błąd pobierania lotto.pl (%s): %s", url_lotto, exc)
-
-    time.sleep(DELAY_SEC)
+    logger.info("Megalotto HTTP %s (len=%d)", resp.status_code, len(resp.text))
+    records = _parse_megalotto(resp.text, year)
+    logger.info("Megalotto: sparsowano %d losowań z roku %d", len(records), year)
 
     if not records:
-        logger.error(
-            "Brak wyników dla roku %d — obie źródła zawiodły. "
-            "Sprawdź połączenie sieciowe lub strukturę HTML źródłowych stron.",
-            year,
-        )
+        # zapis raw HTML dla dopasowania parsera 2026 (i kolejnych lat)
+        RAW_DIR.mkdir(parents=True, exist_ok=True)
+        out_html = RAW_DIR / f"megalotto_raw_{year}.html"
+        out_html.write_text(resp.text, encoding="utf-8")
+        logger.warning("Zapisano raw HTML (0 rekordów): %s", out_html)
+
+    time.sleep(DELAY_SEC)
 
     return records
 
@@ -303,6 +344,10 @@ def update_db(records: list[dict]) -> int:
 # AKTUALIZACJA XLSX
 # ============================================================
 def update_xlsx(records: list[dict]) -> None:
+    # import opóźniony: żeby scraping + DB działały nawet gdy pandas/numpy
+    # mają problem z inicjalizacją w środowisku
+    import pandas as pd
+
     if not records:
         logger.info("Brak rekordów do zapisania w XLSX.")
         return
