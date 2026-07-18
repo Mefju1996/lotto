@@ -2,6 +2,8 @@ import sys
 import random
 import sqlite3
 import json
+import statistics
+import itertools
 from pathlib import Path
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
@@ -10,28 +12,32 @@ import subprocess
 import threading
 import time
 
+import matplotlib
+matplotlib.use("TkAgg")
+import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 APP_TITLE = "Generator Lotto - Tkinter"
 
 
 def get_root_dir() -> Path:
-    """Zwraca ROOT_DIR zarówno dla .py jak i .exe (PyInstaller).
-    Jeśli .exe znajduje się w dist/, cofa się do katalogu nadrzędnego.
+    """Zwraca ROOT_DIR zarowno dla .py jak i .exe (PyInstaller).
+    Jesli .exe znajduje sie w dist/, cofa sie do katalogu nadrzednego.
     """
     if getattr(sys, 'frozen', False):
         exe_dir = Path(sys.executable).parent
-        # PyInstaller domyślnie buduje do dist/ — sprawdź czy scripts/ jest obok lub poziom wyżej
         if (exe_dir / "scripts").exists():
             return exe_dir
         parent = exe_dir.parent
         if (parent / "scripts").exists():
             return parent
-        # Ostatnia deska ratunku — katalog exe
         return exe_dir
     return Path(__file__).resolve().parents[1]
 
 
 def get_python_executable() -> str:
-    """Zwraca ścieżkę do python.exe — działa i dla .py i dla .exe (PyInstaller)."""
+    """Zwraca sciezke do python.exe - dziala i dla .py i dla .exe (PyInstaller)."""
     if getattr(sys, 'frozen', False):
         import shutil
         py = shutil.which("python") or shutil.which("python3")
@@ -39,7 +45,7 @@ def get_python_executable() -> str:
             return py
         raise RuntimeError(
             "Nie znaleziono python.exe w PATH!\n"
-            "Zainstaluj Python i upewnij się, że jest w PATH."
+            "Zainstaluj Python i upewnij sie, ze jest w PATH."
         )
     return sys.executable
 
@@ -75,7 +81,6 @@ ANALYSIS_DIR = ROOT_DIR / "analysis"
 DEFAULT_HISTORY_SHEET = "Arkusz1"
 DEFAULT_HISTORY_DB = DATA_DIR / "lotto_history.db"
 
-# Kolory status bara
 _STATUS_COLORS = {
     "info":    "#e5e7eb",
     "success": "#4ade80",
@@ -85,7 +90,7 @@ _STATUS_COLORS = {
 
 
 def find_latest_stats() -> Path | None:
-    """Zwraca najnowszy plik statystyk z folderu analysis/ (według mtime)."""
+    """Zwraca najnowszy plik statystyk z folderu analysis/ (wedlug mtime)."""
     if not ANALYSIS_DIR.exists():
         return None
     candidates = list(ANALYSIS_DIR.glob("statystyki_lotto*.xlsx"))
@@ -310,6 +315,7 @@ class LottoStatistics:
             "streak": streak,
         }
 
+
 class LottoApp:
     def __init__(self, root):
         self.root = root
@@ -328,12 +334,19 @@ class LottoApp:
         self.current_numbers = []
         self._status_reset_id = None
 
+        # Statystyki odstepow (historyczne, per liczba) + wykres biezacego losowania
+        self.number_gap_stats = {}
+        self.chart_canvas = None
+        self.chart_figure = None
+        self.chart_ax = None
+        self.chart_ax2 = None
+        self.chart_host = None
+        self.gap_stats_label = None
+
         # Build UI
         self._build_ui()
         self._auto_load()
 
-    # ------------------------------------------------------------------
-    # STATUS BAR
     # ------------------------------------------------------------------
     def _number_color_from_cold_streak(self, n: int) -> str:
         neutral = "#475569"
@@ -374,6 +387,235 @@ class LottoApp:
                 5000, lambda: self.set_status("Gotowy", "info", auto_reset=False)
             )
 
+    # ------------------------------------------------------------------
+    # STATYSTYKI ODSTEPOW MIEDZY WYSTAPIENIAMI LICZBY (historyczne, per liczba)
+    # ------------------------------------------------------------------
+    def _get_all_draws(self):
+        if not self.history_db:
+            return []
+        try:
+            rows = self.history_db.execute(
+                "SELECT id, draw_date, numbers FROM draws ORDER BY id ASC"
+            ).fetchall()
+            draws = []
+            for draw_id, draw_date, numbers_json in rows:
+                try:
+                    numbers = json.loads(numbers_json)
+                    if isinstance(numbers, list):
+                        draws.append({
+                            "id": draw_id,
+                            "draw_date": str(draw_date or ""),
+                            "numbers": [int(x) for x in numbers],
+                        })
+                except Exception:
+                    pass
+            return draws
+        except Exception:
+            return []
+
+    def _compute_gap_stats_for_all_numbers(self):
+        """Liczy dla kazdej liczby 1-49 odstepy (w liczbie losowan) miedzy
+        kolejnymi wystapieniami oraz srednia, mediane i dominanty tych odstepow."""
+        draws = self._get_all_draws()
+        positions = {n: [] for n in range(1, 50)}
+
+        for idx, draw in enumerate(draws):
+            for n in draw["numbers"]:
+                if 1 <= n <= 49:
+                    positions[n].append(idx)
+
+        total_draws = len(draws)
+        result = {}
+        for n in range(1, 50):
+            pos = positions[n]
+            gaps = [pos[i] - pos[i - 1] for i in range(1, len(pos))]
+            current_gap = (total_draws - 1 - pos[-1]) if pos else None
+
+            if gaps:
+                result[n] = {
+                    "count": len(pos),
+                    "gaps": gaps,
+                    "mean_gap": round(statistics.mean(gaps), 2),
+                    "median_gap": statistics.median(gaps),
+                    "mode_gaps": statistics.multimode(gaps),
+                    "min_gap": min(gaps),
+                    "max_gap": max(gaps),
+                    "current_gap": current_gap,
+                }
+            else:
+                result[n] = {
+                    "count": len(pos),
+                    "gaps": [],
+                    "mean_gap": None,
+                    "median_gap": None,
+                    "mode_gaps": [],
+                    "min_gap": None,
+                    "max_gap": None,
+                    "current_gap": current_gap,
+                }
+
+        self.number_gap_stats = result
+
+    # ------------------------------------------------------------------
+    # WYKRES BIEZACEGO LOSOWANIA: "ile losowan temu" dla 6 liczb
+    # + porownanie z historyczna srednia/mediana + suma skumulowana
+    # ------------------------------------------------------------------
+    def _current_draw_gaps(self):
+        """Zwraca liste (liczba, ile_losowan_temu) dla aktualnie wylosowanych
+        liczb. Najpierw probuje danych z arkusza statystyk (Cold Streaks),
+        a jesli ich nie ma - liczy to samo na podstawie bazy historii."""
+        result = []
+        for n in self.current_numbers:
+            gap = None
+            if self.stats:
+                streak = self.stats.cold_streak.get(n)
+                if streak:
+                    gap = streak.get("losowan_temu")
+            if gap is None:
+                hist = self.number_gap_stats.get(n)
+                if hist:
+                    gap = hist.get("current_gap")
+            result.append((n, gap))
+        return result
+
+    def _draw_gap_summary_stats(self, gaps):
+        values = [g for _, g in gaps if g is not None]
+        if not values:
+            return None
+        return {
+            "mean": round(statistics.mean(values), 2),
+            "median": statistics.median(values),
+            "mode": statistics.multimode(values),
+            "sum": sum(values),
+            "cumsum": list(itertools.accumulate(values)),
+        }
+
+    def _build_chart_panel(self, parent):
+        wrapper = Frame(parent, bg="#111827", relief=RIDGE, bd=1)
+        wrapper.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+
+        Label(
+            wrapper,
+            text="Ile losowan temu (biezace) vs historyczna srednia + suma skumulowana",
+            bg="#111827",
+            fg="white",
+            font=("Arial", 10, "bold"),
+        ).pack(anchor=W, padx=10, pady=(8, 4))
+
+        self.chart_host = Frame(wrapper, bg="#0b1220")
+        self.chart_host.pack(fill=BOTH, expand=True, padx=10, pady=(0, 4))
+
+        self.chart_figure = Figure(figsize=(5, 2.6), dpi=100)
+        self.chart_ax = self.chart_figure.add_subplot(111)
+        self.chart_figure.patch.set_facecolor("#0b1220")
+        self.chart_ax.set_facecolor("#0b1220")
+
+        self.chart_canvas = FigureCanvasTkAgg(self.chart_figure, master=self.chart_host)
+        self.chart_canvas.draw()
+        self.chart_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+        self.gap_stats_label = Label(
+            wrapper,
+            text="Srednia: --   Mediana: --   Dominanta: --   Suma: --",
+            bg="#111827",
+            fg="#9ca3af",
+            font=("Arial", 9),
+            justify=LEFT,
+        )
+        self.gap_stats_label.pack(anchor=W, padx=10, pady=(0, 8))
+
+    def _update_draw_gap_chart(self):
+        if not self.chart_ax or not self.chart_canvas:
+            return
+
+        gaps = self._current_draw_gaps()
+        labels = [str(n) for n, _ in gaps]
+        current_vals = [g if g is not None else 0 for _, g in gaps]
+        historical_vals = []
+        for n, _ in gaps:
+            hist = self.number_gap_stats.get(n)
+            if hist and hist.get("mean_gap") is not None:
+                historical_vals.append(hist["mean_gap"])
+            else:
+                historical_vals.append(0)
+
+        has_current = any(g is not None for _, g in gaps)
+        has_history = any(v > 0 for v in historical_vals)
+
+        self.chart_ax.clear()
+        if self.chart_ax2 is not None:
+            self.chart_ax2.remove()
+            self.chart_ax2 = None
+
+        self.chart_ax.set_facecolor("#0b1220")
+        self.chart_figure.patch.set_facecolor("#0b1220")
+
+        if not has_current or not labels:
+            self.chart_ax.text(
+                0.5, 0.5, "Brak danych 'ile losowan temu' dla biezacych liczb",
+                ha="center", va="center", color="white", fontsize=9,
+                transform=self.chart_ax.transAxes, wrap=True
+            )
+            self.chart_ax.set_xticks([])
+            self.chart_ax.set_yticks([])
+            self.chart_canvas.draw()
+            if self.gap_stats_label:
+                self.gap_stats_label.config(text="Srednia: --   Mediana: --   Dominanta: --   Suma: --")
+            return
+
+        x = np.arange(len(labels))
+        width = 0.38
+
+        self.chart_ax.bar(x - width / 2, current_vals, width,
+                           label="Biezace (ile los. temu)",
+                           color="#2563eb", edgecolor="#60a5fa")
+        if has_history:
+            self.chart_ax.bar(x + width / 2, historical_vals, width,
+                               label="Historyczna srednia",
+                               color="#10b981", edgecolor="#34d399")
+
+        self.chart_ax.set_xticks(x)
+        self.chart_ax.set_xticklabels(labels)
+        self.chart_ax.set_ylabel("Losowan temu", color="#93c5fd", fontsize=8)
+        self.chart_ax.tick_params(axis="x", colors="white", labelsize=9)
+        self.chart_ax.tick_params(axis="y", colors="#93c5fd", labelsize=8)
+        self.chart_ax.grid(axis="y", color="#334155", alpha=0.35, linestyle="--", linewidth=0.7)
+        for spine in self.chart_ax.spines.values():
+            spine.set_color("#475569")
+
+        cumsum = list(itertools.accumulate(current_vals))
+        ax2 = self.chart_ax.twinx()
+        self.chart_ax2 = ax2
+        ax2.plot(x, cumsum, color="#f59e0b", linewidth=2, marker="o", label="Suma skumulowana")
+        ax2.set_ylabel("Suma skumulowana", color="#f59e0b", fontsize=8)
+        ax2.tick_params(axis="y", colors="#f59e0b", labelsize=8)
+        for spine in ax2.spines.values():
+            spine.set_color("#475569")
+        max_cum = max(cumsum) if cumsum else 1
+        ax2.set_ylim(0, max_cum * 1.15 if max_cum > 0 else 1)
+
+        handles1, labels1 = self.chart_ax.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        legend = self.chart_ax.legend(
+            handles1 + handles2, labels1 + labels2,
+            loc="upper left", fontsize=7, framealpha=0.2, facecolor="#111827",
+            labelcolor="white",
+        )
+
+        self.chart_ax.set_title("Biezace vs historyczne 'ile losowan temu' + suma skumulowana",
+                                 color="white", fontsize=9)
+
+        self.chart_figure.tight_layout()
+        self.chart_canvas.draw()
+
+        stats = self._draw_gap_summary_stats(gaps)
+        if stats and self.gap_stats_label:
+            mode_txt = ", ".join(str(x) for x in stats["mode"])
+            self.gap_stats_label.config(
+                text=(f"Srednia: {stats['mean']}   Mediana: {stats['median']}   "
+                      f"Dominanta: {mode_txt}   Suma: {stats['sum']}")
+            )
+
     def _build_ui(self):
         Label(self.root, text="Generator Lotto - Tkinter",
               font=("Arial", 20, "bold"), bg="#0b1220", fg="white").pack(pady=10)
@@ -381,11 +623,11 @@ class LottoApp:
         btn_frame = Frame(self.root, bg="#0b1220")
         btn_frame.pack(pady=5, fill=X, padx=10)
 
-        Button(btn_frame, text="\U0001f3b1  Losuj", command=self._draw,
+        Button(btn_frame, text="Losuj", command=self._draw,
                bg="#0ea5e9", fg="white", font=("Arial", 10, "bold"), width=14,
                relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
-        Button(btn_frame, text="\u27f3  Aktualizuj", command=self._update_results,
+        Button(btn_frame, text="Aktualizuj", command=self._update_results,
                bg="#059669", fg="white", font=("Arial", 10, "bold"), width=14,
                relief=RAISED, bd=2).pack(side=LEFT, padx=5)
 
@@ -394,14 +636,14 @@ class LottoApp:
         self._data_menu = Menu(self.root, tearoff=0, bg="#1f2937", fg="white",
                                activebackground="#374151", activeforeground="white",
                                relief=FLAT, bd=0)
-        self._data_menu.add_command(label="\U0001f4ca  Wczytaj statystyki",
+        self._data_menu.add_command(label="Wczytaj statystyki",
                                     command=self._pick_stats)
-        self._data_menu.add_command(label="\U0001f4c2  Plik historii \u2014 zmie\u0144",
+        self._data_menu.add_command(label="Plik historii - zmien",
                                     command=self._pick_history)
-        self._data_menu.add_command(label="\U0001f4dc  Historia losowa\u0144",
+        self._data_menu.add_command(label="Historia losowan",
                                     command=self._show_history)
         self._data_menu.add_separator()
-        self._data_menu.add_command(label="\U0001f5c4  Baza danych",
+        self._data_menu.add_command(label="Baza danych",
                                     command=self._show_database)
 
         def _open_data_menu():
@@ -411,7 +653,7 @@ class LottoApp:
             self._data_menu.tk_popup(x, y)
 
         self._btn_data = Button(
-            btn_frame, text="\u25be  Dane", command=_open_data_menu,
+            btn_frame, text="Dane", command=_open_data_menu,
             bg="#334155", fg="white", font=("Arial", 10), width=12,
             relief=RAISED, bd=1
         )
@@ -446,19 +688,9 @@ class LottoApp:
             val.pack(pady=5)
             self.stat_cards[title] = val
 
-        for title, vmin, vmax, gmin, gmax in [
-            ("Suma", 80, 220, 110, 185),
-            ("Spread", 8, 48, 31, 42)
-        ]:
-            frame = Frame(left_frame, bg="#1f2937", relief=RIDGE, bd=1)
-            frame.pack(pady=5, fill=X)
-            Label(frame, text=f"{title}: --", bg="#1f2937", fg="white",
-                 font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
-            self.stat_cards[f"{title}_label"] = frame.winfo_children()[0]
-
         diff_frame = Frame(left_frame, bg="#1f2937", relief=RIDGE, bd=1)
         diff_frame.pack(pady=5, fill=BOTH, expand=True)
-        Label(diff_frame, text="R\u00f3\u017cnice mi\u0119dzy kolejnymi liczbami",
+        Label(diff_frame, text="Roznice miedzy kolejnymi liczbami",
              bg="#1f2937", fg="white", font=("Arial", 9, "bold")).pack(anchor=W, padx=5, pady=2)
         self.diff_text = Text(diff_frame, height=4, bg="#0b1220", fg="#e5e7eb",
                              font=("Courier", 9), relief=FLAT, wrap=WORD)
@@ -468,7 +700,7 @@ class LottoApp:
         right_frame = Frame(content_frame, bg="#111827", relief=RIDGE, bd=1)
         right_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=5)
 
-        Label(right_frame, text="Szczeg\u00f3\u0142y liczby", bg="#111827", fg="white",
+        Label(right_frame, text="Szczegoly liczby", bg="#111827", fg="white",
              font=("Arial", 14, "bold")).pack(anchor=W, padx=10, pady=5)
 
         self.lbl_num = Label(right_frame, text="--", bg="#111827", fg="#ffd166",
@@ -479,6 +711,8 @@ class LottoApp:
                                 font=("Courier", 10), relief=FLAT, wrap=WORD)
         self.details_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
         self.details_text.config(state=DISABLED)
+
+        self._build_chart_panel(right_frame)
 
         ttk.Separator(self.root, orient=HORIZONTAL).pack(fill=X, side=BOTTOM)
         self.status_bar = ttk.Label(
@@ -505,7 +739,7 @@ class LottoApp:
                 "warning", auto_reset=False
             )
         else:
-            self.set_status("Brak statystyk \u2014 u\u017cyj menu 'Dane' \u2192 Wczytaj statystyki",
+            self.set_status("Brak statystyk - uzyj menu 'Dane' -> Wczytaj statystyki",
                             "warning", auto_reset=False)
 
     def _generate_stats_in_background(self):
@@ -530,20 +764,20 @@ class LottoApp:
                     if latest:
                         self.root.after(100, lambda p=latest: self._load_stats(p))
                         self.root.after(200, lambda: self.set_status(
-                            "Statystyki wygenerowane pomy\u015blnie", "success"))
+                            "Statystyki wygenerowane pomyslnie", "success"))
                     else:
                         self.root.after(0, lambda: self.set_status(
                             "Statystyki: plik nie znaleziony po generowaniu", "error", auto_reset=False))
                 else:
-                    err = result.stderr[:300] if result.stderr else "Nieznany b\u0142\u0105d"
+                    err = result.stderr[:300] if result.stderr else "Nieznany blad"
                     self.root.after(0, lambda e=err: self.set_status(
-                        f"B\u0142\u0105d generowania statystyk: {e}", "error", auto_reset=False))
+                        f"Blad generowania statystyk: {e}", "error", auto_reset=False))
             except subprocess.TimeoutExpired:
                 self.root.after(0, lambda: self.set_status(
                     "Timeout przy generowaniu statystyk", "error", auto_reset=False))
             except Exception as e:
                 self.root.after(0, lambda ex=e: self.set_status(
-                    f"B\u0142\u0105d statystyk: {ex}", "error", auto_reset=False))
+                    f"Blad statystyk: {ex}", "error", auto_reset=False))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -551,7 +785,7 @@ class LottoApp:
         def run():
             try:
                 self.root.after(0, lambda: self.set_status(
-                    "Aktualizacja wynik\u00f3w lotto...", "warning", auto_reset=False))
+                    "Aktualizacja wynikow lotto...", "warning", auto_reset=False))
 
                 script_path = ROOT_DIR / "scripts" / "scraper_megalotto.py"
                 if not script_path.exists():
@@ -567,27 +801,27 @@ class LottoApp:
                 if result.returncode == 0:
                     self.root.after(0, self._reload_history_main_thread)
                     self.root.after(100, lambda: self.set_status(
-                        "Wyniki lotto zaktualizowane pomy\u015blnie", "success"))
+                        "Wyniki lotto zaktualizowane pomyslnie", "success"))
                     self.root.after(300, self._generate_stats_in_background)
                 else:
-                    error_msg = result.stderr[:300] if result.stderr else "Nieznany b\u0142\u0105d"
+                    error_msg = result.stderr[:300] if result.stderr else "Nieznany blad"
                     self.root.after(0, self._update_labels)
                     self.root.after(0, lambda e=error_msg: self.set_status(
-                        f"B\u0142\u0105d aktualizacji: {e}", "error", auto_reset=False))
+                        f"Blad aktualizacji: {e}", "error", auto_reset=False))
                     self.root.after(100, lambda e=error_msg: messagebox.showerror(
-                        "B\u0142\u0105d", f"Nie uda\u0142o si\u0119 zaktualizowa\u0107 wynik\u00f3w:\n{e}"))
+                        "Blad", f"Nie udalo sie zaktualizowac wynikow:\n{e}"))
             except subprocess.TimeoutExpired:
                 self.root.after(0, self._update_labels)
                 self.root.after(0, lambda: self.set_status(
-                    "Timeout \u2014 aktualizacja trwa\u0142a zbyt d\u0142ugo", "error", auto_reset=False))
+                    "Timeout - aktualizacja trwala zbyt dlugo", "error", auto_reset=False))
                 self.root.after(100, lambda: messagebox.showerror(
-                    "Timeout", "Aktualizacja trwa\u0142a zbyt d\u0142ugo"))
+                    "Timeout", "Aktualizacja trwala zbyt dlugo"))
             except Exception as e:
                 self.root.after(0, self._update_labels)
                 self.root.after(0, lambda ex=e: self.set_status(
-                    f"B\u0142\u0105d aktualizacji: {ex}", "error", auto_reset=False))
+                    f"Blad aktualizacji: {ex}", "error", auto_reset=False))
                 self.root.after(100, lambda ex=e: messagebox.showerror(
-                    "B\u0142\u0105d", f"B\u0142\u0105d aktualizacji: {ex}"))
+                    "Blad", f"Blad aktualizacji: {ex}"))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -597,8 +831,8 @@ class LottoApp:
 
     def _show_database(self):
         if not self.history_db:
-            self.set_status("Baza danych nie jest za\u0142adowana", "warning")
-            messagebox.showwarning("Baza danych", "Baza danych nie jest za\u0142adowana")
+            self.set_status("Baza danych nie jest zaladowana", "warning")
+            messagebox.showwarning("Baza danych", "Baza danych nie jest zaladowana")
             return
 
         try:
@@ -606,11 +840,11 @@ class LottoApp:
             cursor.execute("SELECT id, draw_date, numbers FROM draws ORDER BY id DESC LIMIT 100")
             rows = cursor.fetchall()
         except Exception as e:
-            self.set_status(f"B\u0142\u0105d odczytu bazy: {e}", "error")
-            messagebox.showerror("B\u0142\u0105d", f"Nie mog\u0119 odczyta\u0107 bazy: {e}")
+            self.set_status(f"Blad odczytu bazy: {e}", "error")
+            messagebox.showerror("Blad", f"Nie moge odczytac bazy: {e}")
             return
 
-        self.set_status(f"Otwarto widok bazy ({len(rows)} rekord\u00f3w)", "info")
+        self.set_status(f"Otwarto widok bazy ({len(rows)} rekordow)", "info")
 
         db_win = Toplevel(self.root)
         db_win.title("Baza danych - Wyniki Lotto")
@@ -618,7 +852,7 @@ class LottoApp:
         db_win.configure(bg="#0b1220")
 
         Label(Frame(db_win, bg="#0b1220").pack(pady=5) or db_win,
-              text=f"Wy\u015bwietlono 100 ostatnich losowa\u0144 (total: {len(rows)})",
+              text=f"Wyswietlono 100 ostatnich losowan (total: {len(rows)})",
               font=("Arial", 11, "bold"), bg="#0b1220", fg="white").pack()
 
         tree_frame = Frame(db_win, bg="#0b1220")
@@ -680,8 +914,8 @@ class LottoApp:
                 self.set_status(f"Dane wyeksportowane: {path}", "success")
                 messagebox.showinfo("Sukces", f"Dane wyeksportowane do:\n{path}")
             except Exception as e:
-                self.set_status(f"B\u0142\u0105d eksportu: {e}", "error")
-                messagebox.showerror("B\u0142\u0105d", f"Nie mog\u0119 eksportowa\u0107: {e}")
+                self.set_status(f"Blad eksportu: {e}", "error")
+                messagebox.showerror("Blad", f"Nie moge eksportowac: {e}")
 
         Button(db_win, text="Eksportuj do CSV", command=export_to_csv,
                bg="#334155", fg="white", font=("Arial", 10)).pack(pady=5)
@@ -695,7 +929,7 @@ class LottoApp:
         if latest:
             self._load_stats(latest)
         else:
-            self.set_status("Statystyki nie znalezione \u2014 generuj\u0119...", "warning", auto_reset=False)
+            self.set_status("Statystyki nie znalezione - generuje...", "warning", auto_reset=False)
             self._generate_stats_in_background()
 
         self._update_labels()
@@ -707,13 +941,13 @@ class LottoApp:
             self.stats_path = Path(path)
             self.freq_map = {k: v["procent"] for k, v in self.stats.frequency.items()}
             self.status_map = {i: self.stats.status_short(i) for i in range(1, 50)}
-            self.set_status(f"Za\u0142adowano statystyki: {Path(path).name}", "success")
+            self.set_status(f"Zaladowano statystyki: {Path(path).name}", "success")
         except Exception as exc:
             self.stats = None
             self.freq_map = {i: 0.0 for i in range(1, 50)}
             self.status_map = {i: "" for i in range(1, 50)}
-            self.set_status(f"B\u0142\u0105d statystyk: {exc}", "error", auto_reset=False)
-            messagebox.showerror("B\u0142\u0105d statystyk", str(exc))
+            self.set_status(f"Blad statystyk: {exc}", "error", auto_reset=False)
+            messagebox.showerror("Blad statystyk", str(exc))
         self._update_labels()
 
     def _load_history(self):
@@ -731,10 +965,11 @@ class LottoApp:
                 str(self.history_path), check_same_thread=False)
             count = self.history_db.execute(
                 "SELECT COUNT(*) FROM draws").fetchone()[0]
-            self.set_status(f"Historia za\u0142adowana: {count} losowa\u0144", "success")
+            self.set_status(f"Historia zaladowana: {count} losowan", "success")
+            self._compute_gap_stats_for_all_numbers()
         except Exception as e:
             self.history_db = None
-            self.set_status(f"B\u0142\u0105d bazy historii: {e}", "error", auto_reset=False)
+            self.set_status(f"Blad bazy historii: {e}", "error", auto_reset=False)
 
     def _pick_stats(self):
         start = str(self.stats_path.parent if self.stats_path else ROOT_DIR)
@@ -749,6 +984,7 @@ class LottoApp:
             self._update_labels()
             if self.current_numbers:
                 self._show_number(self.current_numbers[0])
+            self._update_draw_gap_chart()
 
     def _pick_history(self):
         start = str(self.history_path.parent if self.history_path else ROOT_DIR)
@@ -760,6 +996,7 @@ class LottoApp:
             self.history_path = Path(path)
             self._load_history()
             self._update_labels()
+            self._update_draw_gap_chart()
 
     def _combination_exists(self, numbers):
         if not self.history_db:
@@ -793,14 +1030,15 @@ class LottoApp:
         self.stat_cards["P/N"].config(text=f"{s['parzyste']}P-{s['nieparzyste']}N")
         self.stat_cards["L/H"].config(text=f"{s['niskie']}L-{s['wysokie']}H")
         self.stat_cards["Historia"].config(
-            text="BY\u0141A" if self._combination_exists(numbers) else "NOWA")
+            text="BYLA" if self._combination_exists(numbers) else "NOWA")
 
         self.diff_text.config(state=NORMAL)
         self.diff_text.delete("1.0", END)
-        self.diff_text.insert(END, "R\u00f3\u017cnice: " + " - ".join(str(d) for d in s["diffs"]))
+        self.diff_text.insert(END, "Roznice: " + " - ".join(str(d) for d in s["diffs"]))
         self.diff_text.config(state=DISABLED)
 
         self._show_number(numbers[0])
+        self._update_draw_gap_chart()
 
     def _on_ball_clicked(self, idx):
         if idx < len(self.current_numbers):
@@ -822,7 +1060,7 @@ class LottoApp:
             draws.reverse()
             return draws
         except Exception as e:
-            self.set_status(f"B\u0142\u0105d pobierania historii: {e}", "error")
+            self.set_status(f"Blad pobierania historii: {e}", "error")
             return []
 
     def _show_history(self):
@@ -832,10 +1070,10 @@ class LottoApp:
             messagebox.showinfo("Historia", "Brak danych historycznych w bazie")
             return
 
-        self.set_status(f"Otwarto histori\u0119 ({len(draws)} losowa\u0144)", "info")
+        self.set_status(f"Otwarto historie ({len(draws)} losowan)", "info")
 
         hist_win = Toplevel(self.root)
-        hist_win.title("Historia wylosowa\u0144")
+        hist_win.title("Historia wylosowan")
         hist_win.geometry("600x500")
         hist_win.configure(bg="#0b1220")
 
@@ -864,7 +1102,7 @@ class LottoApp:
         self.lbl_num.config(text=str(n))
 
         if not self.stats:
-            details = "Brak wczytanych statystyk.\nU\u017cyj menu 'Dane' \u2192 Wczytaj statystyki."
+            details = "Brak wczytanych statystyk.\nUzyj menu 'Dane' -> Wczytaj statystyki."
         else:
             d = self.stats.number_stats(n)
             streak_txt = (f"{d['streak']['losowan_temu']} los. temu | {d['streak']['status']}"
@@ -872,22 +1110,61 @@ class LottoApp:
             roll_txt = (f"{d['rolling_current']:.1f} (min {d['rolling_min']:.1f}, max {d['rolling_max']:.1f})"
                         if d["rolling_current"] is not None else "brak danych")
 
-            details = (
-                f"Status:      {d['status']}\n"
-                f"Wyst\u0105pienia: {d['wystapienia']}\n"
-                f"Udzia\u0142:      {d['procent']:.2f} %\n"
-                f"Rolling100:  {roll_txt}\n"
-                f"Cold streak: {streak_txt}\n\n"
+            gap = self.number_gap_stats.get(n, {})
+            mode_gaps = gap.get("mode_gaps") or []
+            mode_txt = ", ".join(str(x) for x in mode_gaps) if mode_gaps else "brak danych"
+            mean_txt = f"{gap['mean_gap']:.2f}" if gap.get("mean_gap") is not None else "brak danych"
+            median_txt = str(gap["median_gap"]) if gap.get("median_gap") is not None else "brak danych"
+            minmax_txt = (
+                f"{gap['min_gap']} / {gap['max_gap']}"
+                if gap.get("min_gap") is not None and gap.get("max_gap") is not None
+                else "brak danych"
             )
+            count_txt = str(gap["count"]) if gap.get("count") is not None else "brak danych"
+
+            current_streak = d["streak"]["losowan_temu"] if d["streak"] else gap.get("current_gap")
+            delta_vs_median = (
+                current_streak - gap["median_gap"]
+                if current_streak is not None and gap.get("median_gap") is not None
+                else None
+            )
+            delta_txt = f"{delta_vs_median:+g}" if delta_vs_median is not None else "brak danych"
+            current_txt = str(current_streak) if current_streak is not None else "brak danych"
+
+            details_lines = [
+                f"Status:      {d['status']}",
+                f"Wystapienia: {d['wystapienia']}",
+                f"Udzial:      {d['procent']:.2f} %",
+                f"Rolling100:  {roll_txt}",
+                f"Cold streak: {streak_txt}",
+                "",
+                "Odstepy miedzy wystapieniami (historia bazy):",
+                f"  Liczba wystapien w historii: {count_txt}",
+                f"  Biezacy odstep:      {current_txt}",
+                f"  Srednia historyczna: {mean_txt}",
+                f"  Mediana historyczna: {median_txt}",
+                f"  Dominanta:           {mode_txt}",
+                f"  Min / Max:           {minmax_txt}",
+                f"  Biezacy vs mediana:  {delta_txt}",
+                "",
+            ]
+
             if d["last_years"]:
-                details += "Ostatnie lata:\n" + "  ".join(f"{y}: {v}" for y, v in d["last_years"]) + "\n\n"
+                details_lines.append("Ostatnie lata:")
+                details_lines.append("  ".join(f"{y}: {v}" for y, v in d["last_years"]))
+                details_lines.append("")
             else:
-                details += "Brak danych rocznych.\n\n"
+                details_lines.append("Brak danych rocznych.")
+                details_lines.append("")
+
             if d["pairs"]:
-                details += "TOP pary:\n" + "\n".join(
-                    f"  {p['para']} - {p['wystapienia']} razy" for p in d["pairs"])
+                details_lines.append("TOP pary:")
+                for p in d["pairs"]:
+                    details_lines.append(f"  {p['para']} - {p['wystapienia']} razy")
             else:
-                details += "Brak danych o parach."
+                details_lines.append("Brak danych o parach.")
+
+            details = "\n".join(details_lines)
 
         self.details_text.config(state=NORMAL)
         self.details_text.delete("1.0", END)
